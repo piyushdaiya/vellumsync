@@ -12,7 +12,7 @@ import kotlin.math.hypot
 class SupernoteVectorPreviewView(
     context: Context,
     private var pageReport: SupernoteStrokeGeometryPageReport?,
-    private var transformMode: SupernotePreviewTransformMode = SupernotePreviewTransformMode.A5X_PORTRAIT
+    private var transformMode: SupernotePreviewTransformMode = SupernotePreviewTransformMode.A5X_RAW
 ) : View(context) {
     private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -52,15 +52,16 @@ class SupernoteVectorPreviewView(
         pageReport: SupernoteStrokeGeometryPageReport?,
         transformMode: SupernotePreviewTransformMode = this.transformMode
     ) {
+        val changedPage = this.pageReport?.pageNumber != pageReport?.pageNumber
+        val changedTransform = this.transformMode != transformMode
         this.pageReport = pageReport
         this.transformMode = transformMode
+        if (changedPage || changedTransform) resetViewportSilently()
         invalidate()
     }
 
     fun resetViewport() {
-        panX = 0f
-        panY = 0f
-        zoomMultiplier = 1f
+        resetViewportSilently()
         invalidate()
     }
 
@@ -104,11 +105,9 @@ class SupernoteVectorPreviewView(
             }
 
             MotionEvent.ACTION_POINTER_UP -> {
-                if (event.pointerCount <= 2) {
-                    activeGesture = GestureMode.PAN
-                    lastTouchX = event.x
-                    lastTouchY = event.y
-                }
+                activeGesture = GestureMode.PAN
+                lastTouchX = event.getX(0)
+                lastTouchY = event.getY(0)
                 return true
             }
 
@@ -171,19 +170,6 @@ class SupernoteVectorPreviewView(
             }
             canvas.drawPath(path, paint)
         }
-
-        canvas.drawText(
-            "Page ${report.pageNumber}: rendered ${report.renderedRecords}/${report.decodedRecords} records",
-            24f,
-            40f,
-            textPaint
-        )
-        canvas.drawText(
-            "Transform: ${transformMode.label}  Zoom: ${String.format(java.util.Locale.US, "%.1fx", zoomMultiplier)}",
-            24f,
-            78f,
-            textPaint
-        )
     }
 
     private fun drawPageFrameAndRuledBackground(
@@ -196,8 +182,8 @@ class SupernoteVectorPreviewView(
     ) {
         canvas.drawRect(left, top, left + drawWidth, top + drawHeight, borderPaint)
 
-        // Placeholder ruled background for A5X 8mm ruled notes. This is only a
-        // visual alignment aid until RATTA_RLE BGLAYER decoding is implemented.
+        // Placeholder ruled background for A5X 8mm ruled notes. This remains
+        // only an alignment aid until RATTA_RLE BGLAYER decode is implemented.
         val lineSpacingPx = 70f * scale
         if (lineSpacingPx < 8f) return
 
@@ -206,6 +192,12 @@ class SupernoteVectorPreviewView(
             canvas.drawLine(left, y, left + drawWidth, y, ruledLinePaint)
             y += lineSpacingPx
         }
+    }
+
+    private fun resetViewportSilently() {
+        panX = 0f
+        panY = 0f
+        zoomMultiplier = 1f
     }
 
     private fun pointerDistance(event: MotionEvent): Float {

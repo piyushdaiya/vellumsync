@@ -87,8 +87,8 @@ fun RecentNotesScreen(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Text(text = "VellumSync Viewer")
-        Text(text = "Open cached Supernote .note files in read-only viewer mode. Original .note files are never modified.")
+        Text(text = "VellumSync")
+        Text(text = "Read-only Supernote .note viewer for Android e-ink tablets.")
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Button(
@@ -175,11 +175,10 @@ private fun RecentNoteCard(
         ) {
             Text(text = note.fileName)
             Text(text = "Size: ${note.fileSizeBytes} bytes")
-            Text(text = "SHA-256: ${note.sha256}")
+            Text(text = "SHA-256: ${note.sha256.take(16)}…")
             Text(text = "Cached: ${Date(note.lastModifiedMillis)}")
-            Text(text = "Path: ${note.notePath}")
             Button(onClick = onOpenViewer) {
-                Text(text = "Open in viewer")
+                Text(text = "Open")
             }
         }
     }

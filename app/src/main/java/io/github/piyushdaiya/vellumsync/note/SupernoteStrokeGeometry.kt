@@ -104,10 +104,14 @@ data class SupernoteStrokeGeometryReport(
     val totalSkippedRecords: Int,
     val totalUnknownSubtypeRecords: Int,
     val totalPossibleEraserOrMetadataRecords: Int,
-    val defaultTransformMode: String = "a5x-portrait-candidate",
+    val defaultTransformMode: String = "a5x-raw",
     val supportedTransformModes: List<String> = listOf(
-        "raw-fit",
+        "a5x-raw",
         "a5x-portrait-candidate",
+        "a5x-portrait-candidate-2",
+        "a5x-flipped-portrait",
+        "a5x-rotated-portrait",
+        "raw-fit",
         "rotate-90",
         "rotate-180",
         "rotate-270",
@@ -166,7 +170,7 @@ object SupernoteStrokeGeometryDecoder {
             if (totalPossibleEraser > 0) {
                 add("$totalPossibleEraser record(s) look like possible eraser, metadata, or non-stroke paths and need subtype work.")
             }
-            add("Render fidelity preview supports transform candidates: raw-fit, A5X portrait, rotate 90/180/270, flip X, and flip Y.")
+            add("Render fidelity preview supports compact A5X calibration presets plus generic rotation/flip modes.")
             add("Vector preview is still read-only and uses transform candidates for visual alignment against Supernote PDF exports.")
         }
         return SupernoteStrokeGeometryReport(
@@ -179,10 +183,14 @@ object SupernoteStrokeGeometryDecoder {
             totalSkippedRecords = totalSkipped,
             totalUnknownSubtypeRecords = totalUnknown,
             totalPossibleEraserOrMetadataRecords = totalPossibleEraser,
-            defaultTransformMode = "a5x-portrait-candidate",
+            defaultTransformMode = "a5x-raw",
             supportedTransformModes = listOf(
-                "raw-fit",
+                "a5x-raw",
                 "a5x-portrait-candidate",
+                "a5x-portrait-candidate-2",
+                "a5x-flipped-portrait",
+                "a5x-rotated-portrait",
+                "raw-fit",
                 "rotate-90",
                 "rotate-180",
                 "rotate-270",
@@ -230,7 +238,7 @@ object SupernoteStrokeGeometryDecoder {
             pageWidth = pageWidth,
             pageHeight = pageHeight,
             rawBounds = rawBounds,
-            transform = "raw-fit source geometry; preview UI can apply A5X/rotation/flip transform modes",
+            transform = "raw-fit source geometry; viewer can apply A5X calibration, rotation, and flip transform modes",
             decodedRecords = page.candidateRecords.size,
             renderedRecords = rendered,
             skippedRecords = skipped,
