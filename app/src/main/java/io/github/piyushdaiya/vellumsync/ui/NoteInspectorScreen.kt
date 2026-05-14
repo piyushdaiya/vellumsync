@@ -329,7 +329,7 @@ private fun TotalPathProbeReportCard(report: SupernoteTotalPathProbeReport) {
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(text = "TOTALPATH stroke probe v0")
+            Text(text = "TOTALPATH record-chain + point-array decoder v0")
             Text(text = "Status: ${report.formatStatus}")
             Text(text = "Pages with TOTALPATH: ${report.pagesWithTotalPath}")
             Text(text = "Total estimated payload bytes: ${report.totalEstimatedPayloadBytes}")
@@ -349,11 +349,15 @@ private fun TotalPathProbeReportCard(report: SupernoteTotalPathProbeReport) {
                     Text(text = "declaredPayloadSize=${page.declaredPayloadSize ?: "unknown"} declaredRecordCount=${page.declaredRecordCount ?: "unknown"}")
                     Text(text = "headerSizeMatchesPayload=${page.headerSizeMatchesPayload ?: "unknown"} semanticRecordMarkers=${page.semanticRecordMarkerCount} recordCountMatchesMarkers=${page.recordCountMatchesSemanticMarkers ?: "unknown"}")
                     Text(text = "candidateStrokeRecordCount=${page.candidateStrokeRecordCount ?: "unknown"}")
+                    Text(text = "recordsDecodedByLengthChain=${page.recordsDecodedByLengthChain} recordsWithPointArrays=${page.recordsWithDecodedPointArrays}")
                     Text(text = "boundaryStatus=${page.recordBoundaryModelStatus}")
+                    Text(text = "chainStatus=${page.recordChainDecoderStatus}")
+                    Text(text = "pointArrayStatus=${page.pointArrayDecodeStatus}")
                     if (page.candidateRecords.isNotEmpty()) {
                         Text(text = "Candidate record boundaries")
                         page.candidateRecords.take(12).forEach { record ->
                             Text(text = "#${record.recordIndex} ${record.category} start=${record.estimatedRecordStartRelativeOffset}/${record.estimatedRecordStartAbsoluteOffset} end=${record.estimatedRecordEndRelativeOffset}/${record.estimatedRecordEndAbsoluteOffset} bytes=${record.estimatedRecordByteLength}")
+                            Text(text = "declaredRecordPayloadSize=${record.declaredRecordPayloadSize ?: "?"} source=${record.recordLengthSource} chain=${record.decodedByLengthChain}")
                             Text(text = "firstU32=${record.firstU32LeFields.take(8).joinToString()}")
                             record.candidateBounds?.let { bounds ->
                                 Text(text = "boundsProbe rel=${bounds.sourceRelativeOffset} values=${bounds.values.joinToString()}")
@@ -361,6 +365,11 @@ private fun TotalPathProbeReportCard(report: SupernoteTotalPathProbeReport) {
                             record.candidatePointRun?.let { run ->
                                 Text(text = "pointRun ${run.encoding} relPayload=${run.relativeOffsetInPayload} relRecord=${run.relativeOffsetInRecord} pairs=${run.pairCount}")
                                 Text(text = "pointPreview=${run.previewPairs.joinToString { pair -> "[${pair.joinToString()}]" }}")
+                            }
+                            record.decodedPointArray?.let { decoded ->
+                                Text(text = "decodedPointArray count=${decoded.decodedPointCount} fieldRel=${decoded.pointCountFieldRelativeOffsetInRecord} arrayRel=${decoded.pointArrayRelativeOffsetInRecord}")
+                                Text(text = "rawBounds x=${decoded.minX}..${decoded.maxX} y=${decoded.minY}..${decoded.maxY}")
+                                Text(text = "rawPreview=${decoded.rawPointPreview.joinToString { point -> "[${point.x}, ${point.y}]" }}")
                             }
                             record.warnings.forEach { warning -> Text(text = "  • $warning") }
                         }

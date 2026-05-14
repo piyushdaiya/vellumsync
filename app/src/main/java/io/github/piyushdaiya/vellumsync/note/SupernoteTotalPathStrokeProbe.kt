@@ -9,7 +9,10 @@ private const val TOTAL_PATH_PREVIEW_BYTES = 128
 private const val MAX_MARKER_CONTEXTS = 5
 private const val MAX_NUMERIC_RUNS_PER_PAGE = 10
 private const val RECORD_CATEGORY_MARKER_OFFSET_HINT = 60
-private const val MAX_RECORD_REPORTS_PER_PAGE = 40
+private const val MAX_RECORD_REPORTS_PER_PAGE = 64
+private const val MAX_POINT_PREVIEW_PAIRS = 16
+private const val MAX_POINT_TAIL_PAIRS = 6
+private const val POINT_COUNT_OFFSET_FROM_CATEGORY_MARKER = 164
 
 data class SupernoteTotalPathMarkerHit(
     val marker: String,
@@ -119,6 +122,61 @@ data class SupernoteTotalPathPointRunProbe(
     }
 }
 
+data class SupernoteRawPoint(
+    val x: Long,
+    val y: Long
+) {
+    fun toJson(): String = "{\"x\":$x,\"y\":$y}"
+}
+
+data class SupernoteTotalPathPointArrayDecode(
+    val status: String,
+    val encoding: String,
+    val pointCountFieldRelativeOffsetInRecord: Int,
+    val pointCountFieldAbsoluteOffset: Int,
+    val pointArrayRelativeOffsetInRecord: Int,
+    val pointArrayRelativeOffsetInPayload: Int,
+    val pointArrayAbsoluteOffset: Int,
+    val declaredPointCount: Int,
+    val decodedPointCount: Int,
+    val minX: Long?,
+    val maxX: Long?,
+    val minY: Long?,
+    val maxY: Long?,
+    val rawPointPreview: List<SupernoteRawPoint>,
+    val rawPointTailPreview: List<SupernoteRawPoint>,
+    val interpretation: String,
+    val warnings: List<String>
+) {
+    fun toJson(): String {
+        return buildString {
+            append("{")
+            append("\"status\":${JsonText.quote(status)},")
+            append("\"encoding\":${JsonText.quote(encoding)},")
+            append("\"pointCountFieldRelativeOffsetInRecord\":$pointCountFieldRelativeOffsetInRecord,")
+            append("\"pointCountFieldAbsoluteOffset\":$pointCountFieldAbsoluteOffset,")
+            append("\"pointArrayRelativeOffsetInRecord\":$pointArrayRelativeOffsetInRecord,")
+            append("\"pointArrayRelativeOffsetInPayload\":$pointArrayRelativeOffsetInPayload,")
+            append("\"pointArrayAbsoluteOffset\":$pointArrayAbsoluteOffset,")
+            append("\"declaredPointCount\":$declaredPointCount,")
+            append("\"decodedPointCount\":$decodedPointCount,")
+            append("\"minX\":${minX ?: "null"},")
+            append("\"maxX\":${maxX ?: "null"},")
+            append("\"minY\":${minY ?: "null"},")
+            append("\"maxY\":${maxY ?: "null"},")
+            append("\"rawPointPreview\":[")
+            append(rawPointPreview.joinToString(separator = ",") { it.toJson() })
+            append("],")
+            append("\"rawPointTailPreview\":[")
+            append(rawPointTailPreview.joinToString(separator = ",") { it.toJson() })
+            append("],")
+            append("\"interpretation\":${JsonText.quote(interpretation)},")
+            append("\"warnings\":${JsonText.stringArray(warnings)}")
+            append("}")
+        }
+    }
+}
+
 data class SupernoteTotalPathRecordBoundary(
     val recordIndex: Int,
     val category: String,
@@ -129,9 +187,13 @@ data class SupernoteTotalPathRecordBoundary(
     val estimatedRecordEndRelativeOffset: Int,
     val estimatedRecordEndAbsoluteOffset: Int,
     val estimatedRecordByteLength: Int,
+    val declaredRecordPayloadSize: Long?,
+    val recordLengthSource: String,
+    val decodedByLengthChain: Boolean,
     val firstU32LeFields: List<Long>,
     val candidateBounds: SupernoteTotalPathBoundsProbe?,
     val candidatePointRun: SupernoteTotalPathPointRunProbe?,
+    val decodedPointArray: SupernoteTotalPathPointArrayDecode?,
     val warnings: List<String>
 ) {
     fun toJson(): String {
@@ -146,9 +208,13 @@ data class SupernoteTotalPathRecordBoundary(
             append("\"estimatedRecordEndRelativeOffset\":$estimatedRecordEndRelativeOffset,")
             append("\"estimatedRecordEndAbsoluteOffset\":$estimatedRecordEndAbsoluteOffset,")
             append("\"estimatedRecordByteLength\":$estimatedRecordByteLength,")
+            append("\"declaredRecordPayloadSize\":${declaredRecordPayloadSize ?: "null"},")
+            append("\"recordLengthSource\":${JsonText.quote(recordLengthSource)},")
+            append("\"decodedByLengthChain\":$decodedByLengthChain,")
             append("\"firstU32LeFields\":[${firstU32LeFields.joinToString(separator = ",")}],")
             append("\"candidateBounds\":${candidateBounds?.toJson() ?: "null"},")
             append("\"candidatePointRun\":${candidatePointRun?.toJson() ?: "null"},")
+            append("\"decodedPointArray\":${decodedPointArray?.toJson() ?: "null"},")
             append("\"warnings\":${JsonText.stringArray(warnings)}")
             append("}")
         }
@@ -168,6 +234,10 @@ data class SupernoteTotalPathPageReport(
     val semanticRecordMarkerCount: Int,
     val recordCountMatchesSemanticMarkers: Boolean?,
     val recordBoundaryModelStatus: String,
+    val recordChainDecoderStatus: String,
+    val pointArrayDecodeStatus: String,
+    val recordsDecodedByLengthChain: Int,
+    val recordsWithDecodedPointArrays: Int,
     val candidateRecords: List<SupernoteTotalPathRecordBoundary>,
     val firstPreviewHex: String,
     val firstPreviewAscii: String,
@@ -194,6 +264,10 @@ data class SupernoteTotalPathPageReport(
             append("\"semanticRecordMarkerCount\":$semanticRecordMarkerCount,")
             append("\"recordCountMatchesSemanticMarkers\":${recordCountMatchesSemanticMarkers ?: "null"},")
             append("\"recordBoundaryModelStatus\":${JsonText.quote(recordBoundaryModelStatus)},")
+            append("\"recordChainDecoderStatus\":${JsonText.quote(recordChainDecoderStatus)},")
+            append("\"pointArrayDecodeStatus\":${JsonText.quote(pointArrayDecodeStatus)},")
+            append("\"recordsDecodedByLengthChain\":$recordsDecodedByLengthChain,")
+            append("\"recordsWithDecodedPointArrays\":$recordsWithDecodedPointArrays,")
             append("\"candidateRecords\":[")
             append(candidateRecords.joinToString(separator = ",") { it.toJson() })
             append("],")
@@ -280,11 +354,11 @@ object SupernoteTotalPathStrokeProbe {
             if (missing > 0) {
                 add("$missing page(s) do not expose a TOTALPATH offset.")
             }
-            add("TOTALPATH Record Boundary Model v0 is read-only and heuristic-only; it does not decode editable stroke geometry yet.")
+            add("TOTALPATH Record Chain + Point Array Decode v0 is read-only; vector rendering and write-back are deferred.")
         }
         val status = when {
             pagesWithTotalPath == 0 -> "No TOTALPATH payloads detected."
-            else -> "TOTALPATH record-boundary model v0 built; editable stroke geometry decode is deferred."
+            else -> "TOTALPATH record-chain decoder and point-array decode v0 built; vector rendering is deferred."
         }
         return SupernoteTotalPathProbeReport(
             formatStatus = status,
@@ -314,6 +388,10 @@ object SupernoteTotalPathStrokeProbe {
                 semanticRecordMarkerCount = 0,
                 recordCountMatchesSemanticMarkers = null,
                 recordBoundaryModelStatus = "No TOTALPATH offset parsed for this page.",
+                recordChainDecoderStatus = "No chain decoded because TOTALPATH is absent.",
+                pointArrayDecodeStatus = "No point arrays decoded because TOTALPATH is absent.",
+                recordsDecodedByLengthChain = 0,
+                recordsWithDecodedPointArrays = 0,
                 candidateRecords = emptyList(),
                 firstPreviewHex = "",
                 firstPreviewAscii = "",
@@ -340,13 +418,30 @@ object SupernoteTotalPathStrokeProbe {
         val candidateRecords = buildCandidateRecords(
             payload = payload,
             absolutePayloadStart = start,
-            semanticMarkers = semanticMarkersForRecords
+            semanticMarkers = semanticMarkersForRecords,
+            declaredRecordCount = declaredRecordCount
         )
         val numericRuns = findNumericRuns(payload, start)
         val binarySummary = summarizeBinary(payload)
         val candidateToolSignals = markerHits
             .filter { it.count > 0 && it.marker !in listOf("TOTALPATH", "POINT", "POINTS") }
             .map { "${it.marker}: count=${it.count}" }
+        val recordsDecodedByLengthChain = candidateRecords.count { it.decodedByLengthChain }
+        val recordsWithDecodedPointArrays = candidateRecords.count { it.decodedPointArray != null }
+        val recordChainDecoderStatus = when {
+            candidateRecords.isEmpty() -> "No candidate records decoded."
+            declaredRecordCount != null && recordsDecodedByLengthChain == declaredRecordCount ->
+                "Length-chain decoder produced the declared record count."
+            declaredRecordCount != null ->
+                "Length-chain decoder produced $recordsDecodedByLengthChain of $declaredRecordCount declared records."
+            else -> "Length-chain decoder used semantic fallback because no declared count was available."
+        }
+        val pointArrayDecodeStatus = when {
+            recordsWithDecodedPointArrays == 0 -> "No point arrays decoded."
+            recordsWithDecodedPointArrays == candidateRecords.size ->
+                "Point arrays decoded for all candidate records."
+            else -> "Point arrays decoded for $recordsWithDecodedPointArrays of ${candidateRecords.size} candidate records."
+        }
         val candidateStrokeCount = when {
             declaredRecordCount != null && declaredRecordCount >= 0 -> declaredRecordCount
             semanticRecordMarkerCount > 0 -> semanticRecordMarkerCount
@@ -357,7 +452,7 @@ object SupernoteTotalPathStrokeProbe {
             declaredRecordCount != null && recordCountMatchesSemanticMarkers == true ->
                 "Declared record count matches semantic path marker count."
             declaredRecordCount != null ->
-                "Declared record count parsed, but semantic marker count does not match."
+                "Declared record count parsed; length-chain decoder is authoritative when semantic marker count differs."
             semanticRecordMarkerCount > 0 ->
                 "Semantic path markers found, but declared record count was not parsed."
             else -> "No reliable path-record boundary markers found."
@@ -380,9 +475,11 @@ object SupernoteTotalPathStrokeProbe {
                 add("${numericRuns.size} coordinate/pressure-like numeric run(s) found.")
             }
             if (candidateRecords.isNotEmpty()) {
-                add("${candidateRecords.size} candidate record boundary report(s) generated.")
+                add("${candidateRecords.size} candidate record report(s) generated.")
+                add(recordChainDecoderStatus)
+                add(pointArrayDecodeStatus)
             }
-            add("Stroke geometry decode is deferred until point-array model validation.")
+            add("Stroke vector rendering and write-back remain deferred until coordinate transform validation.")
         }
         val warnings = buildList {
             if (totalPathOffset >= page.pageSectionOffset) {
@@ -397,7 +494,7 @@ object SupernoteTotalPathStrokeProbe {
                 add("Declared payload size + 4 does not match estimated payload length.")
             }
             if (declaredRecordCount != null && recordCountMatchesSemanticMarkers == false) {
-                add("Declared record count does not match semantic marker count; boundary model is provisional.")
+                add("Declared record count does not match semantic marker count; length-chain decoder is used and semantic markers are annotations only.")
             }
             if (numericRuns.isEmpty()) {
                 add("No coordinate-like numeric runs were detected by the conservative heuristic.")
@@ -417,6 +514,10 @@ object SupernoteTotalPathStrokeProbe {
             semanticRecordMarkerCount = semanticRecordMarkerCount,
             recordCountMatchesSemanticMarkers = recordCountMatchesSemanticMarkers,
             recordBoundaryModelStatus = boundaryStatus,
+            recordChainDecoderStatus = recordChainDecoderStatus,
+            pointArrayDecodeStatus = pointArrayDecodeStatus,
+            recordsDecodedByLengthChain = recordsDecodedByLengthChain,
+            recordsWithDecodedPointArrays = recordsWithDecodedPointArrays,
             candidateRecords = candidateRecords,
             firstPreviewHex = previewHex(payload),
             firstPreviewAscii = previewAscii(payload),
@@ -479,9 +580,27 @@ object SupernoteTotalPathStrokeProbe {
     private fun buildCandidateRecords(
         payload: ByteArray,
         absolutePayloadStart: Int,
-        semanticMarkers: List<CategoryMarker>
+        semanticMarkers: List<CategoryMarker>,
+        declaredRecordCount: Int?
     ): List<SupernoteTotalPathRecordBoundary> {
-        if (payload.isEmpty() || semanticMarkers.isEmpty()) return emptyList()
+        if (payload.isEmpty()) return emptyList()
+
+        val chainRecords = if (declaredRecordCount != null && declaredRecordCount > 0) {
+            buildLengthChainRecords(
+                payload = payload,
+                absolutePayloadStart = absolutePayloadStart,
+                declaredRecordCount = declaredRecordCount,
+                semanticMarkers = semanticMarkers
+            )
+        } else {
+            emptyList()
+        }
+
+        if (chainRecords.isNotEmpty()) {
+            return chainRecords
+        }
+
+        if (semanticMarkers.isEmpty()) return emptyList()
         val starts = semanticMarkers.map { marker ->
             (marker.relativeOffset - RECORD_CATEGORY_MARKER_OFFSET_HINT).coerceAtLeast(0)
         }
@@ -496,51 +615,153 @@ object SupernoteTotalPathStrokeProbe {
                 payload = payload,
                 absolutePayloadStart = absolutePayloadStart,
                 recordIndex = index,
-                marker = marker,
+                category = marker.category,
+                categoryMarkerRelativeOffset = marker.relativeOffset,
+                categoryMarkerAbsoluteOffset = marker.absoluteOffset,
                 startRelative = startRelative,
-                endRelative = endRelative
+                endRelative = endRelative,
+                declaredRecordPayloadSize = null,
+                recordLengthSource = "semantic-marker-fallback",
+                decodedByLengthChain = false
             )
         }
+    }
+
+    private fun buildLengthChainRecords(
+        payload: ByteArray,
+        absolutePayloadStart: Int,
+        declaredRecordCount: Int,
+        semanticMarkers: List<CategoryMarker>
+    ): List<SupernoteTotalPathRecordBoundary> {
+        val records = mutableListOf<SupernoteTotalPathRecordBoundary>()
+        var cursor = 0
+        var index = 0
+        while (index < declaredRecordCount && index < MAX_RECORD_REPORTS_PER_PAGE && cursor < payload.size) {
+            if (cursor + 12 > payload.size) {
+                break
+            }
+            val declaredRecordPayloadSize = u32le(payload, cursor + 8)
+            val proposedLength = declaredRecordPayloadSize + 4L
+            val safeLength = when {
+                proposedLength <= 0L -> payload.size - cursor
+                proposedLength > Int.MAX_VALUE -> payload.size - cursor
+                cursor + proposedLength.toInt() > payload.size -> payload.size - cursor
+                index == declaredRecordCount - 1 -> payload.size - cursor
+                else -> proposedLength.toInt()
+            }.coerceAtLeast(0)
+            val endRelative = (cursor + safeLength).coerceIn(cursor, payload.size)
+            val marker = semanticMarkers.firstOrNull { it.relativeOffset in cursor until endRelative }
+            val category = marker?.category ?: inferCategoryFromRecord(payload, cursor, endRelative)
+            val categoryRelativeOffset = marker?.relativeOffset ?: findCategoryMarkerRelativeOffsetInRecord(payload, cursor, endRelative, category)
+            records += buildCandidateRecord(
+                payload = payload,
+                absolutePayloadStart = absolutePayloadStart,
+                recordIndex = index,
+                category = category,
+                categoryMarkerRelativeOffset = categoryRelativeOffset,
+                categoryMarkerAbsoluteOffset = if (categoryRelativeOffset >= 0) absolutePayloadStart + categoryRelativeOffset else -1,
+                startRelative = cursor,
+                endRelative = endRelative,
+                declaredRecordPayloadSize = declaredRecordPayloadSize,
+                recordLengthSource = if (index == declaredRecordCount - 1 && cursor + proposedLength.toIntOrNullSafe() != payload.size) {
+                    "length-field-plus-tail"
+                } else {
+                    "length-field-plus-four"
+                },
+                decodedByLengthChain = true
+            )
+            if (endRelative <= cursor) break
+            cursor = endRelative
+            index += 1
+        }
+        return records
+    }
+
+    private fun Long.toIntOrNullSafe(): Int {
+        return if (this in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong()) this.toInt() else Int.MAX_VALUE
+    }
+
+    private fun inferCategoryFromRecord(payload: ByteArray, startRelative: Int, endRelative: Int): String {
+        val record = payload.copyOfRange(startRelative, endRelative.coerceIn(startRelative, payload.size))
+        return when {
+            findOffsets(record, "straightLine".encodeToByteArray()).isNotEmpty() -> "straightLine"
+            findOffsets(record, "others".encodeToByteArray()).isNotEmpty() -> "others"
+            else -> "unknown"
+        }
+    }
+
+    private fun findCategoryMarkerRelativeOffsetInRecord(
+        payload: ByteArray,
+        startRelative: Int,
+        endRelative: Int,
+        category: String
+    ): Int {
+        if (category == "unknown") return -1
+        val record = payload.copyOfRange(startRelative, endRelative.coerceIn(startRelative, payload.size))
+        val local = findOffsets(record, category.encodeToByteArray()).firstOrNull() ?: return -1
+        return startRelative + local
     }
 
     private fun buildCandidateRecord(
         payload: ByteArray,
         absolutePayloadStart: Int,
         recordIndex: Int,
-        marker: CategoryMarker,
+        category: String,
+        categoryMarkerRelativeOffset: Int,
+        categoryMarkerAbsoluteOffset: Int,
         startRelative: Int,
-        endRelative: Int
+        endRelative: Int,
+        declaredRecordPayloadSize: Long?,
+        recordLengthSource: String,
+        decodedByLengthChain: Boolean
     ): SupernoteTotalPathRecordBoundary {
         val safeStart = startRelative.coerceIn(0, payload.size)
         val safeEnd = endRelative.coerceIn(safeStart, payload.size)
         val record = payload.copyOfRange(safeStart, safeEnd)
         val firstFields = firstU32LeFields(record)
         val bounds = candidateBoundsProbe(record, absolutePayloadStart, safeStart)
-        val pointRun = findBestPointRun(record, absolutePayloadStart, safeStart)
+        val decodedPointArray = decodePointArray(
+            record = record,
+            absolutePayloadStart = absolutePayloadStart,
+            recordStartRelative = safeStart,
+            categoryMarkerRelativeOffsetInRecord = if (categoryMarkerRelativeOffset >= safeStart) {
+                categoryMarkerRelativeOffset - safeStart
+            } else {
+                null
+            }
+        )
+        val pointRun = decodedPointArray?.toPointRunProbe() ?: findBestPointRun(record, absolutePayloadStart, safeStart)
         val warnings = buildList {
-            if (marker.relativeOffset < RECORD_CATEGORY_MARKER_OFFSET_HINT) {
+            if (category == "unknown") {
+                add("No known category marker was found inside this record; length-chain boundary is still used.")
+            }
+            if (!decodedByLengthChain && categoryMarkerRelativeOffset < RECORD_CATEGORY_MARKER_OFFSET_HINT) {
                 add("Category marker appears earlier than the expected header offset; record start was clamped to payload start.")
             }
             if (safeEnd <= safeStart) {
                 add("Candidate record has empty or negative boundary.")
             }
-            if (pointRun == null) {
-                add("No plausible u32le point-pair run was found inside this candidate record.")
+            if (decodedPointArray == null && pointRun == null) {
+                add("No plausible point array or fallback u32le point-pair run was found inside this candidate record.")
             }
         }
         return SupernoteTotalPathRecordBoundary(
             recordIndex = recordIndex,
-            category = marker.category,
-            categoryMarkerRelativeOffset = marker.relativeOffset,
-            categoryMarkerAbsoluteOffset = marker.absoluteOffset,
+            category = category,
+            categoryMarkerRelativeOffset = categoryMarkerRelativeOffset,
+            categoryMarkerAbsoluteOffset = categoryMarkerAbsoluteOffset,
             estimatedRecordStartRelativeOffset = safeStart,
             estimatedRecordStartAbsoluteOffset = absolutePayloadStart + safeStart,
             estimatedRecordEndRelativeOffset = safeEnd,
             estimatedRecordEndAbsoluteOffset = absolutePayloadStart + safeEnd,
             estimatedRecordByteLength = safeEnd - safeStart,
+            declaredRecordPayloadSize = declaredRecordPayloadSize,
+            recordLengthSource = recordLengthSource,
+            decodedByLengthChain = decodedByLengthChain,
             firstU32LeFields = firstFields,
             candidateBounds = bounds,
             candidatePointRun = pointRun,
+            decodedPointArray = decodedPointArray,
             warnings = warnings
         )
     }
@@ -574,6 +795,137 @@ object SupernoteTotalPathStrokeProbe {
             values = values,
             interpretation = "Provisional four-field bounds/anchor probe at record-relative offset 108."
         )
+    }
+
+    private fun decodePointArray(
+        record: ByteArray,
+        absolutePayloadStart: Int,
+        recordStartRelative: Int,
+        categoryMarkerRelativeOffsetInRecord: Int?
+    ): SupernoteTotalPathPointArrayDecode? {
+        val candidates = mutableListOf<SupernoteTotalPathPointArrayDecode>()
+        val preferredOffsets = buildList {
+            if (categoryMarkerRelativeOffsetInRecord != null) {
+                add(categoryMarkerRelativeOffsetInRecord + POINT_COUNT_OFFSET_FROM_CATEGORY_MARKER)
+            }
+            add(224)
+        }.distinct()
+
+        preferredOffsets.forEach { offset ->
+            decodePointArrayAtOffset(
+                record = record,
+                absolutePayloadStart = absolutePayloadStart,
+                recordStartRelative = recordStartRelative,
+                pointCountOffset = offset,
+                preferred = true
+            )?.let { candidates += it }
+        }
+
+        if (candidates.isEmpty()) {
+            var offset = 96
+            val maxScan = min(record.size - 12, 512)
+            while (offset <= maxScan) {
+                decodePointArrayAtOffset(
+                    record = record,
+                    absolutePayloadStart = absolutePayloadStart,
+                    recordStartRelative = recordStartRelative,
+                    pointCountOffset = offset,
+                    preferred = false
+                )?.let { candidates += it }
+                offset += 4
+            }
+        }
+
+        return candidates
+            .distinctBy { it.pointCountFieldRelativeOffsetInRecord }
+            .maxWithOrNull(
+                compareBy<SupernoteTotalPathPointArrayDecode> { it.decodedPointCount }
+                    .thenByDescending { if (it.pointCountFieldRelativeOffsetInRecord in preferredOffsets) 1 else 0 }
+                    .thenBy { -it.pointCountFieldRelativeOffsetInRecord }
+            )
+    }
+
+    private fun decodePointArrayAtOffset(
+        record: ByteArray,
+        absolutePayloadStart: Int,
+        recordStartRelative: Int,
+        pointCountOffset: Int,
+        preferred: Boolean
+    ): SupernoteTotalPathPointArrayDecode? {
+        if (pointCountOffset < 0 || pointCountOffset + 12 > record.size) return null
+        val declaredPointCountLong = u32le(record, pointCountOffset)
+        if (declaredPointCountLong !in 1L..10_000L) return null
+        val declaredPointCount = declaredPointCountLong.toInt()
+        val pointArrayOffset = pointCountOffset + 4
+        val requiredBytes = declaredPointCount.toLong() * 8L
+        if (pointArrayOffset + requiredBytes > record.size.toLong()) return null
+
+        val points = mutableListOf<SupernoteRawPoint>()
+        var cursor = pointArrayOffset
+        repeat(declaredPointCount) {
+            val x = u32le(record, cursor)
+            val y = u32le(record, cursor + 4)
+            if (!isPlausiblePointPair(x, y)) {
+                return null
+            }
+            points += SupernoteRawPoint(x = x, y = y)
+            cursor += 8
+        }
+        if (points.isEmpty()) return null
+
+        val distinct = points.toSet().size
+        if (declaredPointCount > 3 && distinct < 2) return null
+
+        val minX = points.minOfOrNull { it.x }
+        val maxX = points.maxOfOrNull { it.x }
+        val minY = points.minOfOrNull { it.y }
+        val maxY = points.maxOfOrNull { it.y }
+        val warnings = buildList {
+            if (!preferred) {
+                add("Point array found by fallback scan rather than preferred category-relative offset.")
+            }
+            if (declaredPointCount <= 2) {
+                add("Very small point array; this may represent a straight line or compact object path.")
+            }
+        }
+        return SupernoteTotalPathPointArrayDecode(
+            status = "decoded",
+            encoding = "u32le-point-count-plus-u32le-xy-pairs",
+            pointCountFieldRelativeOffsetInRecord = pointCountOffset,
+            pointCountFieldAbsoluteOffset = absolutePayloadStart + recordStartRelative + pointCountOffset,
+            pointArrayRelativeOffsetInRecord = pointArrayOffset,
+            pointArrayRelativeOffsetInPayload = recordStartRelative + pointArrayOffset,
+            pointArrayAbsoluteOffset = absolutePayloadStart + recordStartRelative + pointArrayOffset,
+            declaredPointCount = declaredPointCount,
+            decodedPointCount = points.size,
+            minX = minX,
+            maxX = maxX,
+            minY = minY,
+            maxY = maxY,
+            rawPointPreview = points.take(MAX_POINT_PREVIEW_PAIRS),
+            rawPointTailPreview = points.takeLast(min(MAX_POINT_TAIL_PAIRS, points.size)),
+            interpretation = "Raw Supernote coordinate points decoded. Coordinate transform to screen/page space is deferred.",
+            warnings = warnings
+        )
+    }
+
+    private fun SupernoteTotalPathPointArrayDecode.toPointRunProbe(): SupernoteTotalPathPointRunProbe {
+        return SupernoteTotalPathPointRunProbe(
+            encoding = encoding,
+            absoluteOffset = pointArrayAbsoluteOffset,
+            relativeOffsetInPayload = pointArrayRelativeOffsetInPayload,
+            relativeOffsetInRecord = pointArrayRelativeOffsetInRecord,
+            pairCount = decodedPointCount,
+            previewPairs = rawPointPreview.map { listOf(it.x, it.y) },
+            reason = "Decoded from explicit point-count field at record-relative offset $pointCountFieldRelativeOffsetInRecord."
+        )
+    }
+
+    private fun isPlausiblePointPair(x: Long, y: Long): Boolean {
+        if (x == 0L && y == 0L) return false
+        if (x !in 0..25_000L || y !in 0..25_000L) return false
+        if (x < 100L && y < 100L) return false
+        return x > 500L || y > 500L
     }
 
     private fun findBestPointRun(

@@ -22,11 +22,11 @@ class SupernoteTotalPathStrokeProbeTest {
         val page = report.pageReports.first()
         assertEquals(1, page.pageNumber)
         assertEquals(220, page.totalPathOffset)
-        assertEquals(720, page.pageSectionOffset)
+        assertEquals(900, page.pageSectionOffset)
         assertEquals(220, page.estimatedPayloadStartOffset)
-        assertEquals(720, page.estimatedPayloadEndOffset)
-        assertEquals(500, page.estimatedPayloadByteLength)
-        assertEquals(496L, page.declaredPayloadSize)
+        assertEquals(900, page.estimatedPayloadEndOffset)
+        assertEquals(680, page.estimatedPayloadByteLength)
+        assertEquals(676L, page.declaredPayloadSize)
         assertEquals(2, page.declaredRecordCount)
         assertEquals(true, page.headerSizeMatchesPayload)
         assertEquals(2, page.semanticRecordMarkerCount)
@@ -40,19 +40,27 @@ class SupernoteTotalPathStrokeProbeTest {
         assertEquals("others", first.category)
         assertEquals(60, first.categoryMarkerRelativeOffset)
         assertEquals(0, first.estimatedRecordStartRelativeOffset)
-        assertEquals(240, first.estimatedRecordEndRelativeOffset)
+        assertEquals(320, first.estimatedRecordEndRelativeOffset)
+        assertEquals(316L, first.declaredRecordPayloadSize)
+        assertTrue(first.decodedByLengthChain)
         assertNotNull(first.candidateBounds)
         assertNotNull(first.candidatePointRun)
+        assertNotNull(first.decodedPointArray)
+        assertEquals(8, first.decodedPointArray?.decodedPointCount)
         assertFalse(first.firstU32LeFields.isEmpty())
 
         val second = page.candidateRecords[1]
         assertEquals(1, second.recordIndex)
         assertEquals("straightLine", second.category)
-        assertEquals(300, second.categoryMarkerRelativeOffset)
-        assertEquals(240, second.estimatedRecordStartRelativeOffset)
-        assertEquals(500, second.estimatedRecordEndRelativeOffset)
+        assertEquals(380, second.categoryMarkerRelativeOffset)
+        assertEquals(320, second.estimatedRecordStartRelativeOffset)
+        assertEquals(680, second.estimatedRecordEndRelativeOffset)
+        assertEquals(356L, second.declaredRecordPayloadSize)
+        assertTrue(second.decodedByLengthChain)
         assertNotNull(second.candidateBounds)
         assertNotNull(second.candidatePointRun)
+        assertNotNull(second.decodedPointArray)
+        assertEquals(8, second.decodedPointArray?.decodedPointCount)
     }
 
     @Test
@@ -69,35 +77,41 @@ class SupernoteTotalPathStrokeProbeTest {
     }
 
     private fun buildFakeOnePageNoteWithTwoTotalPathRecords(): ByteArray {
-        val bytes = ByteArray(960) { '.'.code.toByte() }
+        val bytes = ByteArray(1200) { '.'.code.toByte() }
         putText(
             bytes,
             0,
             "noteSN_FILE_VER_20230015<FILE_TYPE:NOTE><APPLY_EQUIPMENT:A5X>" +
-                "<FINALOPERATION_PAGE:1><FINALOPERATION_LAYER:1><PAGE1:720>"
+                "<FINALOPERATION_PAGE:1><FINALOPERATION_LAYER:1><PAGE1:900>"
         )
         putText(
             bytes,
-            720,
+            900,
             "<PAGESTYLE:style_8mm_ruled_line_a5x><LAYERINFO:[]>" +
                 "<LAYERSEQ:MAINLAYER,BGLAYER><MAINLAYER:120><BGLAYER:180>" +
                 "<TOTALPATH:220><EXTERNALLINKINFO:0>"
         )
 
         val totalPathOffset = 220
-        val totalPathLength = 500
+        val totalPathLength = 680
+        val firstRecordStart = totalPathOffset
+        val firstRecordLength = 320
+        val secondRecordStart = totalPathOffset + firstRecordLength
+        val secondRecordLength = 360
+
         putU32Le(bytes, totalPathOffset, totalPathLength - 4L)
         putU32Le(bytes, totalPathOffset + 4, 2L)
+        putU32Le(bytes, firstRecordStart + 8, firstRecordLength - 4L)
+        putU32Le(bytes, secondRecordStart + 8, secondRecordLength - 4L)
 
-        putText(bytes, totalPathOffset + 60, "others")
-        putText(bytes, totalPathOffset + 300, "straightLine")
+        putText(bytes, firstRecordStart + 60, "others")
+        putText(bytes, secondRecordStart + 60, "straightLine")
 
-        putBounds(bytes, totalPathOffset + 108, 100, 200, 300, 400)
-        putPointPairs(bytes, totalPathOffset + 128, startX = 12000, startY = 2500)
+        putBounds(bytes, firstRecordStart + 108, 100, 200, 300, 400)
+        putPointPairs(bytes, firstRecordStart + 224, startX = 12000, startY = 2500)
 
-        val secondRecordStart = totalPathOffset + 240
         putBounds(bytes, secondRecordStart + 108, 500, 600, 700, 800)
-        putPointPairs(bytes, secondRecordStart + 128, startX = 13000, startY = 2600)
+        putPointPairs(bytes, secondRecordStart + 224, startX = 13000, startY = 2600)
 
         return bytes
     }
@@ -122,7 +136,8 @@ class SupernoteTotalPathStrokeProbeTest {
         startX: Long,
         startY: Long
     ) {
-        var cursor = offset
+        putU32Le(bytes, offset, 8L)
+        var cursor = offset + 4
         repeat(8) { index ->
             putU32Le(bytes, cursor, startX + index * 10L)
             putU32Le(bytes, cursor + 4, startY + index * 4L)
