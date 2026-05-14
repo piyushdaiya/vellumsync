@@ -25,6 +25,7 @@ import io.github.piyushdaiya.vellumsync.note.ImportedNoteCache
 import io.github.piyushdaiya.vellumsync.note.MarkerHit
 import io.github.piyushdaiya.vellumsync.note.SupernoteContainerReport
 import io.github.piyushdaiya.vellumsync.note.SupernoteInspectionReport
+import io.github.piyushdaiya.vellumsync.note.SupernoteVisualReport
 import io.github.piyushdaiya.vellumsync.note.SupernoteNoteInspector
 
 @Composable
@@ -159,6 +160,7 @@ fun NoteInspectorScreen(
         report.value?.let { inspection ->
             InspectionReportCard(report = inspection)
             ContainerParserReportCard(report = inspection.containerReport)
+            VisualDecoderReportCard(report = inspection.visualReport)
             MarkerReportCard(markerHits = inspection.markerHits)
         }
     }
@@ -249,6 +251,69 @@ private fun ContainerParserReportCard(report: SupernoteContainerReport) {
                     Text(text = "LAYER3=${page.layerOffsets.layer3Offset ?: "not parsed"}")
                     Text(text = "TOTALPATH=${page.layerOffsets.totalPathOffset ?: "not parsed"}")
                     Text(text = "realLink=${page.realLinkMetadataPresent} externalLinkField=${page.externalLinkInfoPresent}")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun VisualDecoderReportCard(report: SupernoteVisualReport) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(text = "Supernote visual pointer + boundary probe v0")
+            Text(text = "Status: ${report.formatStatus}")
+            Text(text = "Layer records: ${report.totalLayerRecords}")
+            Text(text = "RATTA_RLE records: ${report.rleLayerRecordCount}")
+            Text(text = "Unique bitmap payload offsets: ${report.uniqueBitmapPayloadOffsetCount}")
+
+            if (report.sharedBitmapPayloads.isNotEmpty()) {
+                Text(text = "Shared bitmap payloads")
+                report.sharedBitmapPayloads.forEach { payload ->
+                    Text(text = "offset=${payload.bitmapPayloadOffset} reuse=${payload.reuseCount}")
+                    payload.usedBy.forEach { usedBy ->
+                        Text(text = "• $usedBy")
+                    }
+                }
+            }
+
+            if (report.decoderWarnings.isNotEmpty()) {
+                Text(text = "Visual decoder warnings")
+                report.decoderWarnings.forEach { warning ->
+                    Text(text = "• $warning")
+                }
+            }
+
+            Text(text = "Payload boundary probe")
+            Text(text = "Bitmap rendering is intentionally deferred. This view treats LAYERBITMAP as a payload offset and estimates conservative compressed-payload boundaries.")
+
+            report.pageReports.forEach { page ->
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(text = "Page ${page.pageNumber}: ${page.previewStatus}")
+                    Text(text = "style=${page.pageStyle ?: "not parsed"}")
+                    Text(text = "layerSeq=${page.layerSeq ?: "not parsed"}")
+                    if (page.warnings.isNotEmpty()) {
+                        page.warnings.forEach { warning ->
+                            Text(text = "• $warning")
+                        }
+                    }
+                    page.layerRecords.forEach { layer ->
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(text = "${layer.logicalLayerName} recordOffset=${layer.layerRecordOffset} nextStruct=${layer.nextKnownStructuralOffset ?: "unknown"}")
+                            Text(text = "type=${layer.layerType ?: "?"} protocol=${layer.layerProtocol ?: "?"} name=${layer.parsedLayerName ?: "?"}")
+                            Text(text = "metadataBytes=${layer.metadataRecordByteLength ?: "?"} bitmapOffset=${layer.bitmapPayloadOffset ?: "?"}")
+                            Text(text = "payloadEnd=${layer.estimatedCompressedPayloadEndOffset ?: "?"} payloadBytes=${layer.estimatedCompressedPayloadByteLength ?: "?"}")
+                            Text(text = "startsBeforeRecord=${layer.bitmapPayloadStartsBeforeLayerRecord ?: "?"} shared=${layer.bitmapPayloadShared} reuse=${layer.bitmapPayloadReuseCount}")
+                            Text(text = "status=${layer.bitmapPayloadStatus}")
+                            Text(text = "preview=${layer.recordPreviewAscii}")
+                            layer.warnings.forEach { warning ->
+                                Text(text = "• $warning")
+                            }
+                        }
+                    }
                 }
             }
         }

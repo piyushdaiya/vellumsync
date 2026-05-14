@@ -41,6 +41,7 @@ object SupernoteNoteInspector {
         val ascii = bytes.toAsciiLikeString()
         val markerHits = markers.map { marker -> markerHit(bytes, marker) }
         val containerReport = SupernoteContainerParser.parse(bytes)
+        val visualReport = SupernoteVisualDecoder.decode(bytes, containerReport)
 
         val versionMarker = containerReport.header.versionMarker ?: versionRegex.find(ascii)?.value
         val detectedEquipment = containerReport.header.applyEquipment ?: detectEquipment(ascii)
@@ -112,6 +113,7 @@ object SupernoteNoteInspector {
             hasStarMetadata = hasStarMetadata,
             markerHits = markerHits,
             containerReport = containerReport,
+            visualReport = visualReport,
             compatibilityStatus = compatibilityStatus,
             warnings = warnings,
             cachedCopyPath = cachedCopyPath
