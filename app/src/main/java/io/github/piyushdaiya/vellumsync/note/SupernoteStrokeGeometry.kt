@@ -104,6 +104,16 @@ data class SupernoteStrokeGeometryReport(
     val totalSkippedRecords: Int,
     val totalUnknownSubtypeRecords: Int,
     val totalPossibleEraserOrMetadataRecords: Int,
+    val defaultTransformMode: String = "a5x-portrait-candidate",
+    val supportedTransformModes: List<String> = listOf(
+        "raw-fit",
+        "a5x-portrait-candidate",
+        "rotate-90",
+        "rotate-180",
+        "rotate-270",
+        "flip-x",
+        "flip-y"
+    ),
     val pageReports: List<SupernoteStrokeGeometryPageReport>,
     val warnings: List<String>
 ) {
@@ -119,6 +129,8 @@ data class SupernoteStrokeGeometryReport(
             append("\"totalSkippedRecords\":$totalSkippedRecords,")
             append("\"totalUnknownSubtypeRecords\":$totalUnknownSubtypeRecords,")
             append("\"totalPossibleEraserOrMetadataRecords\":$totalPossibleEraserOrMetadataRecords,")
+            append("\"defaultTransformMode\":${JsonText.quote(defaultTransformMode)},")
+            append("\"supportedTransformModes\":${JsonText.stringArray(supportedTransformModes)},")
             append("\"pageReports\":[")
             append(pageReports.joinToString(separator = ",") { it.toJson() })
             append("],")
@@ -154,7 +166,8 @@ object SupernoteStrokeGeometryDecoder {
             if (totalPossibleEraser > 0) {
                 add("$totalPossibleEraser record(s) look like possible eraser, metadata, or non-stroke paths and need subtype work.")
             }
-            add("Vector preview uses raw-bounds normalization for diagnostics; exact A5X-to-screen transform validation is still pending.")
+            add("Render fidelity preview supports transform candidates: raw-fit, A5X portrait, rotate 90/180/270, flip X, and flip Y.")
+            add("Vector preview is still read-only and uses transform candidates for visual alignment against Supernote PDF exports.")
         }
         return SupernoteStrokeGeometryReport(
             formatStatus = status,
@@ -166,6 +179,16 @@ object SupernoteStrokeGeometryDecoder {
             totalSkippedRecords = totalSkipped,
             totalUnknownSubtypeRecords = totalUnknown,
             totalPossibleEraserOrMetadataRecords = totalPossibleEraser,
+            defaultTransformMode = "a5x-portrait-candidate",
+            supportedTransformModes = listOf(
+                "raw-fit",
+                "a5x-portrait-candidate",
+                "rotate-90",
+                "rotate-180",
+                "rotate-270",
+                "flip-x",
+                "flip-y"
+            ),
             pageReports = pageReports,
             warnings = warnings
         )
@@ -207,7 +230,7 @@ object SupernoteStrokeGeometryDecoder {
             pageWidth = pageWidth,
             pageHeight = pageHeight,
             rawBounds = rawBounds,
-            transform = "raw-bounds-fit-to-page; orientation candidate for visual diagnostics only",
+            transform = "raw-fit source geometry; preview UI can apply A5X/rotation/flip transform modes",
             decodedRecords = page.candidateRecords.size,
             renderedRecords = rendered,
             skippedRecords = skipped,

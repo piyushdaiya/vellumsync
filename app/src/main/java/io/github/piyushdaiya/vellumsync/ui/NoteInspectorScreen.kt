@@ -430,6 +430,9 @@ private fun TotalPathProbeReportCard(report: SupernoteTotalPathProbeReport) {
 @Composable
 private fun StrokeGeometryReportCard(report: SupernoteStrokeGeometryReport) {
     val selectedPageIndex = remember { mutableStateOf(0) }
+    val selectedTransformMode = remember {
+        mutableStateOf(SupernotePreviewTransformMode.fromId(report.defaultTransformMode))
+    }
     val pages = report.pageReports
     val selectedPage = pages.getOrNull(selectedPageIndex.value.coerceIn(0, (pages.size - 1).coerceAtLeast(0)))
 
@@ -438,7 +441,7 @@ private fun StrokeGeometryReportCard(report: SupernoteStrokeGeometryReport) {
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(text = "Stroke geometry + vector preview v0")
+            Text(text = "Render fidelity + page preview v0")
             Text(text = "Status: ${report.formatStatus}")
             Text(text = "Pages: ${report.totalPages}")
             Text(text = "Decoded records: ${report.totalDecodedRecords}")
@@ -446,9 +449,11 @@ private fun StrokeGeometryReportCard(report: SupernoteStrokeGeometryReport) {
             Text(text = "Skipped records: ${report.totalSkippedRecords}")
             Text(text = "Unknown subtype records: ${report.totalUnknownSubtypeRecords}")
             Text(text = "Possible eraser/metadata records: ${report.totalPossibleEraserOrMetadataRecords}")
+            Text(text = "Default transform: ${report.defaultTransformMode}")
+            Text(text = "Selected transform: ${selectedTransformMode.value.label}")
 
             if (report.warnings.isNotEmpty()) {
-                Text(text = "Geometry warnings")
+                Text(text = "Render fidelity warnings")
                 report.warnings.forEach { warning -> Text(text = "• $warning") }
             }
 
@@ -466,22 +471,42 @@ private fun StrokeGeometryReportCard(report: SupernoteStrokeGeometryReport) {
                     }
                 }
 
+                Text(text = "Transform candidates")
+                SupernotePreviewTransformMode.values().toList().chunked(2).forEach { rowModes ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        rowModes.forEach { mode ->
+                            Button(onClick = { selectedTransformMode.value = mode }) {
+                                Text(text = mode.label)
+                            }
+                        }
+                    }
+                }
+
                 selectedPage?.let { page ->
                     Text(text = "Preview page ${page.pageNumber}")
                     Text(text = "Records rendered=${page.renderedRecords}/${page.decodedRecords} skipped=${page.skippedRecords}")
                     Text(text = "Unknown=${page.unknownSubtypeRecords} possibleEraserOrMetadata=${page.possibleEraserOrMetadataRecords}")
                     Text(text = "Raw bounds=${page.rawBounds?.minX ?: "?"}..${page.rawBounds?.maxX ?: "?"}, ${page.rawBounds?.minY ?: "?"}..${page.rawBounds?.maxY ?: "?"}")
-                    Text(text = "Transform=${page.transform}")
+                    Text(text = "Geometry source transform=${page.transform}")
+                    Text(text = "Preview transform=${selectedTransformMode.value.id}")
+                    Text(text = "Background: ruled placeholder until RATTA_RLE BGLAYER decode is enabled")
 
                     AndroidView(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(520.dp),
+                            .height(640.dp),
                         factory = { context ->
-                            SupernoteVectorPreviewView(context = context, pageReport = page)
+                            SupernoteVectorPreviewView(
+                                context = context,
+                                pageReport = page,
+                                transformMode = selectedTransformMode.value
+                            )
                         },
                         update = { view ->
-                            view.updatePageReport(page)
+                            view.updatePageReport(
+                                pageReport = page,
+                                transformMode = selectedTransformMode.value
+                            )
                         }
                     )
 
@@ -489,6 +514,12 @@ private fun StrokeGeometryReportCard(report: SupernoteStrokeGeometryReport) {
                         Text(text = "Page warnings")
                         page.warnings.forEach { warning -> Text(text = "• $warning") }
                     }
+
+                    Text(text = "Render summary")
+                    Text(text = "Page size=${page.pageWidth} x ${page.pageHeight}")
+                    Text(text = "Transform mode=${selectedTransformMode.value.label}")
+                    Text(text = "Decoded=${page.decodedRecords} Rendered=${page.renderedRecords} Skipped=${page.skippedRecords}")
+                    Text(text = "Unknown=${page.unknownSubtypeRecords} Possible eraser/metadata=${page.possibleEraserOrMetadataRecords}")
 
                     Text(text = "Record summary")
                     page.records.take(16).forEach { record ->

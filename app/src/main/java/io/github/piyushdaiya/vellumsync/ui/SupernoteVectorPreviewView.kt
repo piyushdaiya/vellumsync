@@ -9,7 +9,8 @@ import io.github.piyushdaiya.vellumsync.note.SupernoteStrokeGeometryPageReport
 
 class SupernoteVectorPreviewView(
     context: Context,
-    private var pageReport: SupernoteStrokeGeometryPageReport?
+    private var pageReport: SupernoteStrokeGeometryPageReport?,
+    private var transformMode: SupernotePreviewTransformMode = SupernotePreviewTransformMode.A5X_PORTRAIT
 ) : View(context) {
     private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -22,6 +23,12 @@ class SupernoteVectorPreviewView(
         alpha = 150
     }
 
+    private val ruledLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 1f
+        alpha = 70
+    }
+
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = 28f
     }
@@ -31,8 +38,12 @@ class SupernoteVectorPreviewView(
         strokeWidth = 2f
     }
 
-    fun updatePageReport(pageReport: SupernoteStrokeGeometryPageReport?) {
+    fun updatePageReport(
+        pageReport: SupernoteStrokeGeometryPageReport?,
+        transformMode: SupernotePreviewTransformMode = this.transformMode
+    ) {
         this.pageReport = pageReport
+        this.transformMode = transformMode
         invalidate()
     }
 
@@ -52,15 +63,24 @@ class SupernoteVectorPreviewView(
         val left = (viewWidth - drawWidth) / 2f
         val top = (viewHeight - drawHeight) / 2f
 
-        canvas.drawRect(left, top, left + drawWidth, top + drawHeight, borderPaint)
+        drawPageFrameAndRuledBackground(
+            canvas = canvas,
+            left = left,
+            top = top,
+            drawWidth = drawWidth,
+            drawHeight = drawHeight,
+            scale = scale
+        )
 
         report.records.forEach { record ->
             if (record.points.size < 2) return@forEach
             val path = Path()
             val first = record.points.first()
-            path.moveTo(left + first.x * scale, top + first.y * scale)
+            val firstMapped = transformMode.transform(first.x, first.y, report.pageWidth, report.pageHeight)
+            path.moveTo(left + firstMapped.first * scale, top + firstMapped.second * scale)
             record.points.drop(1).forEach { point ->
-                path.lineTo(left + point.x * scale, top + point.y * scale)
+                val mapped = transformMode.transform(point.x, point.y, report.pageWidth, report.pageHeight)
+                path.lineTo(left + mapped.first * scale, top + mapped.second * scale)
             }
             val paint = if (record.subtype == "possible_eraser_or_metadata" || record.subtype == "unknown") {
                 lightStrokePaint
@@ -77,10 +97,32 @@ class SupernoteVectorPreviewView(
             textPaint
         )
         canvas.drawText(
-            "Transform: raw-bounds diagnostic fit",
+            "Transform: ${transformMode.label}",
             24f,
             78f,
             textPaint
         )
+    }
+
+    private fun drawPageFrameAndRuledBackground(
+        canvas: Canvas,
+        left: Float,
+        top: Float,
+        drawWidth: Float,
+        drawHeight: Float,
+        scale: Float
+    ) {
+        canvas.drawRect(left, top, left + drawWidth, top + drawHeight, borderPaint)
+
+        // Placeholder ruled background for A5X 8mm ruled notes. This is only a
+        // visual alignment aid until RATTA_RLE BGLAYER decoding is implemented.
+        val lineSpacingPx = 70f * scale
+        if (lineSpacingPx < 8f) return
+
+        var y = top + lineSpacingPx * 2f
+        while (y < top + drawHeight - lineSpacingPx) {
+            canvas.drawLine(left, y, left + drawWidth, y, ruledLinePaint)
+            y += lineSpacingPx
+        }
     }
 }
