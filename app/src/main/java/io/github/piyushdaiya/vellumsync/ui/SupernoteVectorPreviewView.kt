@@ -6,9 +6,12 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.view.MotionEvent
 import android.view.View
+import io.github.piyushdaiya.vellumsync.note.LocalAnnotationColor
 import io.github.piyushdaiya.vellumsync.note.LocalAnnotationPoint
 import io.github.piyushdaiya.vellumsync.note.LocalAnnotationStroke
+import io.github.piyushdaiya.vellumsync.note.LocalAnnotationStrokeStyle
 import io.github.piyushdaiya.vellumsync.note.SupernoteStrokeGeometryPageReport
+import android.graphics.Color
 import java.util.UUID
 import kotlin.math.hypot
 
@@ -16,8 +19,10 @@ class SupernoteVectorPreviewView(
     context: Context,
     private var pageReport: SupernoteStrokeGeometryPageReport?,
     private var transformMode: SupernotePreviewTransformMode = SupernotePreviewTransformMode.A5X_RAW,
-    private var overlayEnabled: Boolean = false,
+    private var overlayEditingEnabled: Boolean = false,
+    private var overlayVisible: Boolean = true,
     private var overlayStrokes: List<LocalAnnotationStroke> = emptyList(),
+    private var currentOverlayStyle: LocalAnnotationStrokeStyle = LocalAnnotationStrokeStyle.DEFAULT,
     private var onOverlayChanged: (List<LocalAnnotationStroke>) -> Unit = {}
 ) : View(context) {
     private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -33,14 +38,12 @@ class SupernoteVectorPreviewView(
 
     private val overlayPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 5f
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
 
     private val overlayPreviewPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 5f
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
         alpha = 180
@@ -74,16 +77,20 @@ class SupernoteVectorPreviewView(
     fun updatePageReport(
         pageReport: SupernoteStrokeGeometryPageReport?,
         transformMode: SupernotePreviewTransformMode = this.transformMode,
-        overlayEnabled: Boolean = this.overlayEnabled,
+        overlayEditingEnabled: Boolean = this.overlayEditingEnabled,
+        overlayVisible: Boolean = this.overlayVisible,
         overlayStrokes: List<LocalAnnotationStroke> = this.overlayStrokes,
+        currentOverlayStyle: LocalAnnotationStrokeStyle = this.currentOverlayStyle,
         onOverlayChanged: (List<LocalAnnotationStroke>) -> Unit = this.onOverlayChanged
     ) {
         val changedPage = this.pageReport?.pageNumber != pageReport?.pageNumber
         val changedTransform = this.transformMode != transformMode
         this.pageReport = pageReport
         this.transformMode = transformMode
-        this.overlayEnabled = overlayEnabled
+        this.overlayEditingEnabled = overlayEditingEnabled
+        this.overlayVisible = overlayVisible
         this.overlayStrokes = overlayStrokes
+        this.currentOverlayStyle = currentOverlayStyle
         this.onOverlayChanged = onOverlayChanged
         if (changedPage || changedTransform) resetViewportSilently()
         invalidate()
@@ -95,7 +102,7 @@ class SupernoteVectorPreviewView(
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (overlayEnabled) {
+        if (overlayEditingEnabled) {
             return handleOverlayTouch(event)
         }
 
@@ -197,25 +204,27 @@ class SupernoteVectorPreviewView(
             canvas.drawPath(path, paint)
         }
 
-        drawOverlayStrokes(
-            canvas = canvas,
-            viewport = viewport,
-            strokes = overlayStrokes,
-            paint = overlayPaint
-        )
-
-        activeOverlayPoints?.let { points ->
-            drawOverlayPath(
+        if (overlayVisible) {
+            drawOverlayStrokes(
                 canvas = canvas,
                 viewport = viewport,
-                points = points,
-                paint = overlayPreviewPaint
+                strokes = overlayStrokes
             )
+
+            activeOverlayPoints?.let { points ->
+                configureOverlayPaint(overlayPreviewPaint, currentOverlayStyle)
+                drawOverlayPath(
+                    canvas = canvas,
+                    viewport = viewport,
+                    points = points,
+                    paint = overlayPreviewPaint
+                )
+            }
         }
 
-        if (overlayEnabled) {
+        if (overlayEditingEnabled) {
             canvas.drawText(
-                "Overlay on: stylus writes, finger ignored",
+                "Overlay edit: stylus writes, finger ignored",
                 viewport.left + 18f,
                 viewport.top + 38f,
                 textPaint
@@ -270,8 +279,9 @@ class SupernoteVectorPreviewView(
                         createdAtMillis = System.currentTimeMillis(),
                         transformModeId = transformMode.id,
                         toolType = activeOverlayToolType,
-                        width = 5f,
-                        points = points
+                        width = currentOverlayStyle.widthPx,
+                        points = points,
+                        style = currentOverlayStyle
                     )
                     overlayStrokes = overlayStrokes + stroke
                     onOverlayChanged(overlayStrokes)
@@ -304,15 +314,15 @@ class SupernoteVectorPreviewView(
     private fun drawOverlayStrokes(
         canvas: Canvas,
         viewport: PreviewViewport,
-        strokes: List<LocalAnnotationStroke>,
-        paint: Paint
+        strokes: List<LocalAnnotationStroke>
     ) {
         strokes.forEach { stroke ->
+            configureOverlayPaint(overlayPaint, stroke.style)
             drawOverlayPath(
                 canvas = canvas,
                 viewport = viewport,
                 points = stroke.points,
-                paint = paint
+                paint = overlayPaint
             )
         }
     }
@@ -331,6 +341,18 @@ class SupernoteVectorPreviewView(
             path.lineTo(viewport.left + point.x * viewport.scale, viewport.top + point.y * viewport.scale)
         }
         canvas.drawPath(path, paint)
+    }
+
+
+    private fun configureOverlayPaint(
+        paint: Paint,
+        style: LocalAnnotationStrokeStyle
+    ) {
+        paint.strokeWidth = style.widthPx
+        paint.color = when (style.color) {
+            LocalAnnotationColor.BLACK -> Color.BLACK
+            LocalAnnotationColor.GRAY -> Color.rgb(130, 130, 130)
+        }
     }
 
     private fun calculateViewport(report: SupernoteStrokeGeometryPageReport): PreviewViewport {

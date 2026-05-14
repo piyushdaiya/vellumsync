@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import io.github.piyushdaiya.vellumsync.note.CachedImportedNote
 import io.github.piyushdaiya.vellumsync.note.ImportedNoteCache
+import io.github.piyushdaiya.vellumsync.note.LocalAnnotationOverlayStore
 import io.github.piyushdaiya.vellumsync.note.SupernoteNoteInspector
 import java.util.Date
 
@@ -168,6 +169,8 @@ private fun RecentNoteCard(
     note: CachedImportedNote,
     onOpenViewer: () -> Unit
 ) {
+    val context = LocalContext.current
+    val overlaySummary = remember(note.sha256) { LocalAnnotationOverlayStore.noteSummary(context, note.sha256) }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -177,6 +180,13 @@ private fun RecentNoteCard(
             Text(text = "Size: ${note.fileSizeBytes} bytes")
             Text(text = "SHA-256: ${note.sha256.take(16)}…")
             Text(text = "Cached: ${Date(note.lastModifiedMillis)}")
+            if (overlaySummary.hasOverlay) {
+                Text(
+                    text = "Local overlay: ${overlaySummary.totalOverlayStrokes} stroke(s) on ${overlaySummary.annotatedPageCount} page(s)"
+                )
+            } else {
+                Text(text = "Local overlay: none")
+            }
             Button(onClick = onOpenViewer) {
                 Text(text = "Open")
             }

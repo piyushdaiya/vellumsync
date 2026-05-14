@@ -21,13 +21,72 @@ data class LocalAnnotationPoint(
     }
 }
 
+enum class LocalAnnotationColor(
+    val id: String,
+    val label: String
+) {
+    BLACK("black", "Black"),
+    GRAY("gray", "Gray");
+
+    companion object {
+        fun fromId(id: String?): LocalAnnotationColor {
+            return values().firstOrNull { it.id == id } ?: BLACK
+        }
+    }
+}
+
+enum class LocalAnnotationWidth(
+    val id: String,
+    val label: String,
+    val width: Float
+) {
+    THIN("thin", "Thin", 3f),
+    MEDIUM("medium", "Medium", 5f),
+    THICK("thick", "Thick", 8f);
+
+    companion object {
+        fun fromId(id: String?): LocalAnnotationWidth {
+            return values().firstOrNull { it.id == id } ?: MEDIUM
+        }
+
+        fun fromWidth(width: Float): LocalAnnotationWidth {
+            return values().minByOrNull { kotlin.math.abs(it.width - width) } ?: MEDIUM
+        }
+    }
+}
+
+data class LocalAnnotationStrokeStyle(
+    val color: LocalAnnotationColor = LocalAnnotationColor.BLACK,
+    val width: LocalAnnotationWidth = LocalAnnotationWidth.MEDIUM
+) {
+    val widthPx: Float get() = width.width
+
+    fun toJson(): String {
+        return buildString {
+            append("{")
+            append("\"color\":${JsonText.quote(color.id)},")
+            append("\"width\":${JsonText.quote(width.id)},")
+            append("\"widthPx\":${widthPx.formatFloat()}")
+            append("}")
+        }
+    }
+
+    companion object {
+        val DEFAULT = LocalAnnotationStrokeStyle()
+    }
+}
+
 data class LocalAnnotationStroke(
     val id: String,
     val createdAtMillis: Long,
     val transformModeId: String,
     val toolType: String,
     val width: Float,
-    val points: List<LocalAnnotationPoint>
+    val points: List<LocalAnnotationPoint>,
+    val style: LocalAnnotationStrokeStyle = LocalAnnotationStrokeStyle(
+        color = LocalAnnotationColor.BLACK,
+        width = LocalAnnotationWidth.fromWidth(width)
+    )
 ) {
     fun toJson(): String {
         return buildString {
@@ -37,6 +96,7 @@ data class LocalAnnotationStroke(
             append("\"transformModeId\":${JsonText.quote(transformModeId)},")
             append("\"toolType\":${JsonText.quote(toolType)},")
             append("\"width\":${width.formatFloat()},")
+            append("\"style\":${style.toJson()},")
             append("\"pointCount\":${points.size},")
             append("\"points\":[")
             append(points.joinToString(separator = ",") { it.toJson() })
@@ -59,6 +119,28 @@ data class LocalAnnotationPageSummary(
             append("\"strokeCount\":$strokeCount,")
             append("\"pointCount\":$pointCount,")
             append("\"sidecarPath\":${JsonText.quote(sidecarPath)}")
+            append("}")
+        }
+    }
+}
+
+data class LocalAnnotationNoteSummary(
+    val noteSha256: String,
+    val annotatedPageCount: Int,
+    val totalOverlayStrokes: Int,
+    val totalOverlayPoints: Int,
+    val sidecarDirectory: String?
+) {
+    val hasOverlay: Boolean get() = totalOverlayStrokes > 0
+
+    fun toJson(): String {
+        return buildString {
+            append("{")
+            append("\"noteSha256\":${JsonText.quote(noteSha256)},")
+            append("\"annotatedPageCount\":$annotatedPageCount,")
+            append("\"totalOverlayStrokes\":$totalOverlayStrokes,")
+            append("\"totalOverlayPoints\":$totalOverlayPoints,")
+            append("\"sidecarDirectory\":${JsonText.quote(sidecarDirectory)}")
             append("}")
         }
     }
@@ -105,7 +187,7 @@ object LocalAnnotationOverlayStore {
                 appendLine("noteSha256=$noteSha256")
                 appendLine("pageNumber=$pageNumber")
                 appendLine("lastTransformModeId=$transformModeId")
-                appendLine("createdBy=VellumSync Local Annotation Overlay v0")
+                appendLine("createdBy=VellumSync Overlay Persistence + Export v0")
                 strokes.forEach { stroke -> appendLine(stroke.toSidecarLine()) }
             }
         )
@@ -136,6 +218,38 @@ object LocalAnnotationOverlayStore {
         )
     }
 
+    fun noteSummary(
+        context: Context,
+        noteSha256: String
+    ): LocalAnnotationNoteSummary {
+        val noteDir = overlayNoteDirectory(context, noteSha256)
+        if (!noteDir.exists() || !noteDir.isDirectory) {
+            return LocalAnnotationNoteSummary(
+                noteSha256 = noteSha256,
+                annotatedPageCount = 0,
+                totalOverlayStrokes = 0,
+                totalOverlayPoints = 0,
+                sidecarDirectory = noteDir.absolutePath
+            )
+        }
+
+        val summaries = noteDir.listFiles()
+            .orEmpty()
+            .filter { it.isFile && it.name.startsWith("page-") && it.name.endsWith(".vlo") }
+            .mapNotNull { file ->
+                val page = file.name.removePrefix("page-").removeSuffix(".vlo").toIntOrNull()
+                page?.let { pageSummary(context, noteSha256, it) }
+            }
+
+        return LocalAnnotationNoteSummary(
+            noteSha256 = noteSha256,
+            annotatedPageCount = summaries.count { it.strokeCount > 0 },
+            totalOverlayStrokes = summaries.sumOf { it.strokeCount },
+            totalOverlayPoints = summaries.sumOf { it.pointCount },
+            sidecarDirectory = noteDir.absolutePath
+        )
+    }
+
     fun diagnosticsJson(
         context: Context,
         noteSha256: String,
@@ -146,12 +260,48 @@ object LocalAnnotationOverlayStore {
         }
         return buildString {
             append("{")
-            append("\"formatStatus\":${JsonText.quote("Local annotation overlay v0 sidecars are stored separately; original Supernote .note files remain read-only.")},")
+            append("\"formatStatus\":${JsonText.quote("Local annotation overlay sidecars are stored separately; original Supernote .note files remain read-only.")},")
             append("\"noteSha256\":${JsonText.quote(noteSha256)},")
+            append("\"sidecarFormat\":${JsonText.quote(VERSION_LINE)},")
+            append("\"sidecarDirectory\":${JsonText.quote(overlayNoteDirectory(context, noteSha256).absolutePath)},")
             append("\"totalOverlayStrokes\":${pages.sumOf { it.strokeCount }},")
             append("\"totalOverlayPoints\":${pages.sumOf { it.pointCount }},")
+            append("\"annotatedPageCount\":${pages.count { it.strokeCount > 0 }},")
             append("\"pages\":[")
             append(pages.joinToString(separator = ",") { it.toJson() })
+            append("]")
+            append("}")
+        }
+    }
+
+    fun overlayExportJson(
+        context: Context,
+        noteSha256: String,
+        totalPages: Int
+    ): String {
+        val pageEntries = (1..totalPages.coerceAtLeast(1)).map { pageNumber ->
+            val strokes = loadPage(context, noteSha256, pageNumber)
+            val summary = pageSummary(context, noteSha256, pageNumber)
+            buildString {
+                append("{")
+                append("\"pageNumber\":$pageNumber,")
+                append("\"summary\":${summary.toJson()},")
+                append("\"strokes\":[")
+                append(strokes.joinToString(separator = ",") { it.toJson() })
+                append("]")
+                append("}")
+            }
+        }
+
+        val summary = noteSummary(context, noteSha256)
+        return buildString {
+            append("{")
+            append("\"format\":${JsonText.quote("VellumSync local annotation overlay export")},")
+            append("\"version\":1,")
+            append("\"writeBackStatus\":${JsonText.quote("sidecar-only; original Supernote .note is not modified")},")
+            append("\"noteSummary\":${summary.toJson()},")
+            append("\"pages\":[")
+            append(pageEntries.joinToString(separator = ","))
             append("]")
             append("}")
         }
@@ -181,6 +331,14 @@ object LocalAnnotationOverlayStore {
         return File(context.filesDir, "annotation-overlays/$safeSha/page-${pageNumber}.vlo")
     }
 
+    fun overlayNoteDirectory(
+        context: Context,
+        noteSha256: String
+    ): File {
+        val safeSha = noteSha256.replace(Regex("[^A-Za-z0-9._-]"), "_")
+        return File(context.filesDir, "annotation-overlays/$safeSha")
+    }
+
     private fun LocalAnnotationStroke.toSidecarLine(): String {
         return listOf(
             "stroke",
@@ -189,6 +347,8 @@ object LocalAnnotationOverlayStore {
             transformModeId,
             toolType,
             width.formatFloat(),
+            style.color.id,
+            style.width.id,
             points.joinToString(separator = ";") { point ->
                 "${point.x.formatFloat()},${point.y.formatFloat()}"
             }
@@ -198,7 +358,18 @@ object LocalAnnotationOverlayStore {
     private fun parseStrokeLine(line: String): LocalAnnotationStroke? {
         val parts = line.split("\t")
         if (parts.size < 7 || parts[0] != "stroke") return null
-        val points = parts[6]
+
+        val hasStyleFields = parts.size >= 9
+        val widthValue = parts[5].toFloatOrNull() ?: LocalAnnotationStrokeStyle.DEFAULT.widthPx
+        val color = if (hasStyleFields) LocalAnnotationColor.fromId(parts[6]) else LocalAnnotationColor.BLACK
+        val widthClass = if (hasStyleFields) {
+            LocalAnnotationWidth.fromId(parts[7])
+        } else {
+            LocalAnnotationWidth.fromWidth(widthValue)
+        }
+        val pointPartIndex = if (hasStyleFields) 8 else 6
+
+        val points = parts[pointPartIndex]
             .split(";")
             .mapNotNull { pointText ->
                 val xy = pointText.split(",")
@@ -212,8 +383,9 @@ object LocalAnnotationOverlayStore {
             createdAtMillis = parts[2].toLongOrNull() ?: 0L,
             transformModeId = parts[3],
             toolType = parts[4],
-            width = parts[5].toFloatOrNull() ?: 4f,
-            points = points
+            width = widthValue,
+            points = points,
+            style = LocalAnnotationStrokeStyle(color = color, width = widthClass)
         )
     }
 }

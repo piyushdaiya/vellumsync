@@ -25,8 +25,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import io.github.piyushdaiya.vellumsync.note.ImportedNoteCache
+import io.github.piyushdaiya.vellumsync.note.LocalAnnotationColor
 import io.github.piyushdaiya.vellumsync.note.LocalAnnotationOverlayStore
 import io.github.piyushdaiya.vellumsync.note.LocalAnnotationStroke
+import io.github.piyushdaiya.vellumsync.note.LocalAnnotationStrokeStyle
+import io.github.piyushdaiya.vellumsync.note.LocalAnnotationWidth
+import io.github.piyushdaiya.vellumsync.note.OverlayRenderExporter
 import io.github.piyushdaiya.vellumsync.note.SupernoteInspectionReport
 import io.github.piyushdaiya.vellumsync.note.SupernoteNoteInspector
 import io.github.piyushdaiya.vellumsync.note.SupernoteStrokeGeometryPageReport
@@ -58,6 +62,7 @@ fun NoteViewerScreen(
     val fullScreenPreview = remember { mutableStateOf(false) }
     val exportError = remember { mutableStateOf<String?>(null) }
     val pendingExportJson = remember { mutableStateOf<String?>(null) }
+    val pendingBinaryExport = remember { mutableStateOf<ByteArray?>(null) }
 
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json")
@@ -70,7 +75,39 @@ fun NoteViewerScreen(
                     text = pendingExportJson.value.orEmpty()
                 )
             }.onFailure { throwable ->
-                exportError.value = throwable.message ?: "Unable to export diagnostics JSON."
+                exportError.value = throwable.message ?: "Unable to export JSON."
+            }
+        }
+    }
+
+    val pngExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("image/png")
+    ) { uri: Uri? ->
+        if (uri != null) {
+            runCatching {
+                writeBytesToUri(
+                    context = context,
+                    uri = uri,
+                    bytes = pendingBinaryExport.value ?: ByteArray(0)
+                )
+            }.onFailure { throwable ->
+                exportError.value = throwable.message ?: "Unable to export overlay PNG."
+            }
+        }
+    }
+
+    val pdfExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/pdf")
+    ) { uri: Uri? ->
+        if (uri != null) {
+            runCatching {
+                writeBytesToUri(
+                    context = context,
+                    uri = uri,
+                    bytes = pendingBinaryExport.value ?: ByteArray(0)
+                )
+            }.onFailure { throwable ->
+                exportError.value = throwable.message ?: "Unable to export overlay PDF."
             }
         }
     }
@@ -82,7 +119,9 @@ fun NoteViewerScreen(
     }
     val selectedPage = pages.getOrNull(safeIndex)
     val selectedPageNumber = selectedPage?.pageNumber ?: 1
-    val overlayEnabled = remember(selection.sha256) { mutableStateOf(false) }
+    val overlayVisible = remember(selection.sha256) { mutableStateOf(true) }
+    val overlayEditingEnabled = remember(selection.sha256) { mutableStateOf(false) }
+    val overlayStyle = remember(selection.sha256) { mutableStateOf(LocalAnnotationStrokeStyle.DEFAULT) }
     val overlayStrokes = remember(selection.sha256, selectedPageNumber) {
         mutableStateOf(LocalAnnotationOverlayStore.loadPage(context, selection.sha256, selectedPageNumber))
     }
@@ -117,9 +156,17 @@ fun NoteViewerScreen(
             onNext = {
                 currentPageIndex.value = (currentPageIndex.value + 1).coerceAtMost(pages.lastIndex)
             },
-            overlayEnabled = overlayEnabled.value,
+            overlayVisible = overlayVisible.value,
+            overlayEditingEnabled = overlayEditingEnabled.value,
+            overlayStyle = overlayStyle.value,
             overlayStrokes = overlayStrokes.value,
-            onOverlayToggle = { overlayEnabled.value = !overlayEnabled.value },
+            onOverlayVisibleToggle = { overlayVisible.value = !overlayVisible.value },
+            onOverlayEditToggle = {
+                val nextEditing = !overlayEditingEnabled.value
+                overlayEditingEnabled.value = nextEditing
+                if (nextEditing) overlayVisible.value = true
+            },
+            onOverlayStyleSelect = { overlayStyle.value = it },
             onUndoOverlay = {
                 if (overlayStrokes.value.isNotEmpty()) {
                     saveOverlayStrokes(overlayStrokes.value.dropLast(1))
@@ -193,10 +240,49 @@ fun NoteViewerScreen(
                 )
 
                 OverlayControlsCard(
-                    enabled = overlayEnabled.value,
+                    overlayVisible = overlayVisible.value,
+                    editingEnabled = overlayEditingEnabled.value,
+                    style = overlayStyle.value,
                     strokeCount = overlayStrokes.value.size,
                     pointCount = overlayStrokes.value.sumOf { it.points.size },
-                    onToggle = { overlayEnabled.value = !overlayEnabled.value },
+                    onToggleVisible = { overlayVisible.value = !overlayVisible.value },
+                    onToggleEditing = {
+                        val nextEditing = !overlayEditingEnabled.value
+                        overlayEditingEnabled.value = nextEditing
+                        if (nextEditing) overlayVisible.value = true
+                    },
+                    onStyleSelect = { overlayStyle.value = it },
+                    onReload = {
+                        overlayStrokes.value = LocalAnnotationOverlayStore.loadPage(
+                            context = context,
+                            noteSha256 = selection.sha256,
+                            pageNumber = selectedPage.pageNumber
+                        )
+                    },
+                    onExportJson = {
+                        pendingExportJson.value = LocalAnnotationOverlayStore.overlayExportJson(
+                            context = context,
+                            noteSha256 = selection.sha256,
+                            totalPages = inspection.strokeGeometryReport.totalPages
+                        )
+                        exportLauncher.launch("vellumsync-overlay-${selection.sha256.take(12)}.json")
+                    },
+                    onExportPng = {
+                        pendingBinaryExport.value = OverlayRenderExporter.renderOverlayPreviewPng(
+                            pageWidth = selectedPage.pageWidth,
+                            pageHeight = selectedPage.pageHeight,
+                            strokes = overlayStrokes.value
+                        )
+                        pngExportLauncher.launch("vellumsync-overlay-page-${selectedPage.pageNumber}.png")
+                    },
+                    onExportPdf = {
+                        pendingBinaryExport.value = OverlayRenderExporter.renderOverlayPreviewPdf(
+                            pageWidth = selectedPage.pageWidth,
+                            pageHeight = selectedPage.pageHeight,
+                            strokes = overlayStrokes.value
+                        )
+                        pdfExportLauncher.launch("vellumsync-overlay-page-${selectedPage.pageNumber}.pdf")
+                    },
                     onUndo = {
                         if (overlayStrokes.value.isNotEmpty()) {
                             saveOverlayStrokes(overlayStrokes.value.dropLast(1))
@@ -220,7 +306,9 @@ fun NoteViewerScreen(
                         currentPageIndex.value = (currentPageIndex.value + 1).coerceAtMost(pages.lastIndex)
                     },
                     onFullScreen = { fullScreenPreview.value = true },
-                    overlayEnabled = overlayEnabled.value,
+                    overlayVisible = overlayVisible.value,
+                    overlayEditingEnabled = overlayEditingEnabled.value,
+                    overlayStyle = overlayStyle.value,
                     overlayStrokes = overlayStrokes.value,
                     onOverlayChanged = saveOverlayStrokes
                 )
@@ -279,7 +367,9 @@ private fun PagePreviewCard(
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onFullScreen: () -> Unit,
-    overlayEnabled: Boolean,
+    overlayVisible: Boolean,
+    overlayEditingEnabled: Boolean,
+    overlayStyle: LocalAnnotationStrokeStyle,
     overlayStrokes: List<LocalAnnotationStroke>,
     onOverlayChanged: (List<LocalAnnotationStroke>) -> Unit
 ) {
@@ -312,8 +402,10 @@ private fun PagePreviewCard(
                         context = androidContext,
                         pageReport = page,
                         transformMode = transformMode,
-                        overlayEnabled = overlayEnabled,
+                        overlayEditingEnabled = overlayEditingEnabled,
+                        overlayVisible = overlayVisible,
                         overlayStrokes = overlayStrokes,
+                        currentOverlayStyle = overlayStyle,
                         onOverlayChanged = onOverlayChanged
                     )
                 },
@@ -321,8 +413,10 @@ private fun PagePreviewCard(
                     view.updatePageReport(
                         pageReport = page,
                         transformMode = transformMode,
-                        overlayEnabled = overlayEnabled,
+                        overlayEditingEnabled = overlayEditingEnabled,
+                        overlayVisible = overlayVisible,
                         overlayStrokes = overlayStrokes,
+                        currentOverlayStyle = overlayStyle,
                         onOverlayChanged = onOverlayChanged
                     )
                 }
@@ -343,9 +437,13 @@ private fun FullScreenPreview(
     onExit: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
-    overlayEnabled: Boolean,
+    overlayVisible: Boolean,
+    overlayEditingEnabled: Boolean,
+    overlayStyle: LocalAnnotationStrokeStyle,
     overlayStrokes: List<LocalAnnotationStroke>,
-    onOverlayToggle: () -> Unit,
+    onOverlayVisibleToggle: () -> Unit,
+    onOverlayEditToggle: () -> Unit,
+    onOverlayStyleSelect: (LocalAnnotationStrokeStyle) -> Unit,
     onUndoOverlay: () -> Unit,
     onClearOverlay: () -> Unit,
     onOverlayChanged: (List<LocalAnnotationStroke>) -> Unit
@@ -374,9 +472,13 @@ private fun FullScreenPreview(
             onSelect = onTransformSelect
         )
         OverlayControlsCompactRow(
-            enabled = overlayEnabled,
+            overlayVisible = overlayVisible,
+            editingEnabled = overlayEditingEnabled,
+            style = overlayStyle,
             strokeCount = overlayStrokes.size,
-            onToggle = onOverlayToggle,
+            onToggleVisible = onOverlayVisibleToggle,
+            onToggleEditing = onOverlayEditToggle,
+            onStyleSelect = onOverlayStyleSelect,
             onUndo = onUndoOverlay,
             onClear = onClearOverlay
         )
@@ -389,8 +491,10 @@ private fun FullScreenPreview(
                     context = androidContext,
                     pageReport = page,
                     transformMode = transformMode,
-                    overlayEnabled = overlayEnabled,
+                    overlayEditingEnabled = overlayEditingEnabled,
+                    overlayVisible = overlayVisible,
                     overlayStrokes = overlayStrokes,
+                    currentOverlayStyle = overlayStyle,
                     onOverlayChanged = onOverlayChanged
                 )
             },
@@ -398,8 +502,10 @@ private fun FullScreenPreview(
                 view.updatePageReport(
                     pageReport = page,
                     transformMode = transformMode,
-                    overlayEnabled = overlayEnabled,
+                    overlayEditingEnabled = overlayEditingEnabled,
+                    overlayVisible = overlayVisible,
                     overlayStrokes = overlayStrokes,
+                    currentOverlayStyle = overlayStyle,
                     onOverlayChanged = onOverlayChanged
                 )
             }
@@ -454,10 +560,18 @@ private fun TransformModeButtonRow(
 
 @Composable
 private fun OverlayControlsCard(
-    enabled: Boolean,
+    overlayVisible: Boolean,
+    editingEnabled: Boolean,
+    style: LocalAnnotationStrokeStyle,
     strokeCount: Int,
     pointCount: Int,
-    onToggle: () -> Unit,
+    onToggleVisible: () -> Unit,
+    onToggleEditing: () -> Unit,
+    onStyleSelect: (LocalAnnotationStrokeStyle) -> Unit,
+    onReload: () -> Unit,
+    onExportJson: () -> Unit,
+    onExportPng: () -> Unit,
+    onExportPdf: () -> Unit,
     onUndo: () -> Unit,
     onClear: () -> Unit
 ) {
@@ -468,57 +582,130 @@ private fun OverlayControlsCard(
         ) {
             Text(text = "Local annotation overlay")
             Text(
-                text = if (enabled) {
-                    "Overlay is ON. Use the Boox pen/stylus to write. Finger touches are ignored while overlay is on."
-                } else {
-                    "Overlay is OFF. Original Supernote .note remains read-only."
+                text = when {
+                    editingEnabled -> "Editing is ON. Use the Boox pen/stylus to write. Finger touches are ignored for drawing."
+                    overlayVisible -> "Overlay is visible but editing is OFF. Use Show/Hide and Edit independently."
+                    else -> "Overlay is hidden and editing is OFF. Original Supernote .note remains read-only."
                 }
             )
             Text(text = "This page overlay: $strokeCount stroke(s), $pointCount point(s)")
+            Text(text = "Stroke style: ${style.color.label} / ${style.width.label}")
             OverlayControlsCompactRow(
-                enabled = enabled,
+                overlayVisible = overlayVisible,
+                editingEnabled = editingEnabled,
+                style = style,
                 strokeCount = strokeCount,
-                onToggle = onToggle,
+                onToggleVisible = onToggleVisible,
+                onToggleEditing = onToggleEditing,
+                onStyleSelect = onStyleSelect,
                 onUndo = onUndo,
                 onClear = onClear
             )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    onClick = onReload
+                ) {
+                    Text(text = "Reload overlay")
+                }
+                Button(
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    onClick = onExportJson
+                ) {
+                    Text(text = "Export JSON")
+                }
+                Button(
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    onClick = onExportPng
+                ) {
+                    Text(text = "Export PNG")
+                }
+                Button(
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    onClick = onExportPdf
+                ) {
+                    Text(text = "Export PDF")
+                }
+            }
         }
     }
 }
 
 @Composable
 private fun OverlayControlsCompactRow(
-    enabled: Boolean,
+    overlayVisible: Boolean,
+    editingEnabled: Boolean,
+    style: LocalAnnotationStrokeStyle,
     strokeCount: Int,
-    onToggle: () -> Unit,
+    onToggleVisible: () -> Unit,
+    onToggleEditing: () -> Unit,
+    onStyleSelect: (LocalAnnotationStrokeStyle) -> Unit,
     onUndo: () -> Unit,
     onClear: () -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Button(
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-            onClick = onToggle
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(text = if (enabled) "Overlay on" else "Overlay off")
+            Button(
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                onClick = onToggleVisible
+            ) {
+                Text(text = if (overlayVisible) "Hide overlay" else "Show overlay")
+            }
+            Button(
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                onClick = onToggleEditing
+            ) {
+                Text(text = if (editingEnabled) "Edit on" else "Edit off")
+            }
+            Button(
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                onClick = onUndo,
+                enabled = strokeCount > 0
+            ) {
+                Text(text = "Undo")
+            }
+            Button(
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                onClick = onClear,
+                enabled = strokeCount > 0
+            ) {
+                Text(text = "Clear page")
+            }
         }
-        Button(
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-            onClick = onUndo,
-            enabled = strokeCount > 0
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(text = "Undo overlay")
-        }
-        Button(
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-            onClick = onClear,
-            enabled = strokeCount > 0
-        ) {
-            Text(text = "Clear page")
+            LocalAnnotationColor.values().forEach { color ->
+                Button(
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    onClick = { onStyleSelect(style.copy(color = color)) },
+                    enabled = style.color != color
+                ) {
+                    Text(text = color.label)
+                }
+            }
+            LocalAnnotationWidth.values().forEach { width ->
+                Button(
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    onClick = { onStyleSelect(style.copy(width = width)) },
+                    enabled = style.width != width
+                ) {
+                    Text(text = width.label)
+                }
+            }
         }
     }
 }

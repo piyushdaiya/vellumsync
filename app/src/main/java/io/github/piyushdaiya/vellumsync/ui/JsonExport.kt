@@ -8,8 +8,20 @@ fun writeTextToUri(
     uri: Uri,
     text: String
 ) {
+    writeBytesToUri(
+        context = context,
+        uri = uri,
+        bytes = text.toByteArray(Charsets.UTF_8)
+    )
+}
+
+fun writeBytesToUri(
+    context: Context,
+    uri: Uri,
+    bytes: ByteArray
+) {
     context.contentResolver.openOutputStream(uri)?.use { output ->
-        output.write(text.toByteArray(Charsets.UTF_8))
+        output.write(bytes)
         output.flush()
     } ?: error("Unable to open export destination.")
 }
