@@ -42,6 +42,7 @@ object SupernoteNoteInspector {
         val markerHits = markers.map { marker -> markerHit(bytes, marker) }
         val containerReport = SupernoteContainerParser.parse(bytes)
         val visualReport = SupernoteVisualDecoder.decode(bytes, containerReport)
+        val totalPathProbeReport = SupernoteTotalPathStrokeProbe.probe(bytes, containerReport)
 
         val versionMarker = containerReport.header.versionMarker ?: versionRegex.find(ascii)?.value
         val detectedEquipment = containerReport.header.applyEquipment ?: detectEquipment(ascii)
@@ -114,6 +115,7 @@ object SupernoteNoteInspector {
             markerHits = markerHits,
             containerReport = containerReport,
             visualReport = visualReport,
+            totalPathProbeReport = totalPathProbeReport,
             compatibilityStatus = compatibilityStatus,
             warnings = warnings,
             cachedCopyPath = cachedCopyPath

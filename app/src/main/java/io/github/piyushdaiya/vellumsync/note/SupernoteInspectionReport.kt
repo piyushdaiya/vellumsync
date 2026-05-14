@@ -44,6 +44,7 @@ data class SupernoteInspectionReport(
     val markerHits: List<MarkerHit>,
     val containerReport: SupernoteContainerReport,
     val visualReport: SupernoteVisualReport,
+    val totalPathProbeReport: SupernoteTotalPathProbeReport,
     val compatibilityStatus: String,
     val warnings: List<String>,
     val cachedCopyPath: String?
@@ -76,6 +77,7 @@ data class SupernoteInspectionReport(
             append("\"cachedCopyPath\":${JsonText.quote(cachedCopyPath)},")
             append("\"containerReport\":${containerReport.toJson()},")
             append("\"visualReport\":${visualReport.toJson()},")
+            append("\"totalPathProbeReport\":${totalPathProbeReport.toJson()},")
             append("\"markerHits\":[")
             append(markerHits.joinToString(separator = ",") { it.toJson() })
             append("]")

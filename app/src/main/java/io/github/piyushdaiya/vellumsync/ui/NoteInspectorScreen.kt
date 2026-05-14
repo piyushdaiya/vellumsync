@@ -26,6 +26,7 @@ import io.github.piyushdaiya.vellumsync.note.MarkerHit
 import io.github.piyushdaiya.vellumsync.note.SupernoteContainerReport
 import io.github.piyushdaiya.vellumsync.note.SupernoteInspectionReport
 import io.github.piyushdaiya.vellumsync.note.SupernoteVisualReport
+import io.github.piyushdaiya.vellumsync.note.SupernoteTotalPathProbeReport
 import io.github.piyushdaiya.vellumsync.note.SupernoteNoteInspector
 
 @Composable
@@ -161,6 +162,7 @@ fun NoteInspectorScreen(
             InspectionReportCard(report = inspection)
             ContainerParserReportCard(report = inspection.containerReport)
             VisualDecoderReportCard(report = inspection.visualReport)
+            TotalPathProbeReportCard(report = inspection.totalPathProbeReport)
             MarkerReportCard(markerHits = inspection.markerHits)
         }
     }
@@ -313,6 +315,98 @@ private fun VisualDecoderReportCard(report: SupernoteVisualReport) {
                                 Text(text = "• $warning")
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TotalPathProbeReportCard(report: SupernoteTotalPathProbeReport) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(text = "TOTALPATH stroke probe v0")
+            Text(text = "Status: ${report.formatStatus}")
+            Text(text = "Pages with TOTALPATH: ${report.pagesWithTotalPath}")
+            Text(text = "Total estimated payload bytes: ${report.totalEstimatedPayloadBytes}")
+
+            if (report.probeWarnings.isNotEmpty()) {
+                Text(text = "Probe warnings")
+                report.probeWarnings.forEach { warning ->
+                    Text(text = "• $warning")
+                }
+            }
+
+            report.pageReports.forEach { page ->
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(text = "Page ${page.pageNumber}")
+                    Text(text = "TOTALPATH offset=${page.totalPathOffset ?: "not parsed"} pageSectionOffset=${page.pageSectionOffset}")
+                    Text(text = "payloadStart=${page.estimatedPayloadStartOffset ?: "?"} payloadEnd=${page.estimatedPayloadEndOffset ?: "?"} payloadBytes=${page.estimatedPayloadByteLength ?: "?"}")
+                    Text(text = "declaredPayloadSize=${page.declaredPayloadSize ?: "unknown"} declaredRecordCount=${page.declaredRecordCount ?: "unknown"}")
+                    Text(text = "headerSizeMatchesPayload=${page.headerSizeMatchesPayload ?: "unknown"} semanticRecordMarkers=${page.semanticRecordMarkerCount} recordCountMatchesMarkers=${page.recordCountMatchesSemanticMarkers ?: "unknown"}")
+                    Text(text = "candidateStrokeRecordCount=${page.candidateStrokeRecordCount ?: "unknown"}")
+                    Text(text = "boundaryStatus=${page.recordBoundaryModelStatus}")
+                    if (page.candidateRecords.isNotEmpty()) {
+                        Text(text = "Candidate record boundaries")
+                        page.candidateRecords.take(12).forEach { record ->
+                            Text(text = "#${record.recordIndex} ${record.category} start=${record.estimatedRecordStartRelativeOffset}/${record.estimatedRecordStartAbsoluteOffset} end=${record.estimatedRecordEndRelativeOffset}/${record.estimatedRecordEndAbsoluteOffset} bytes=${record.estimatedRecordByteLength}")
+                            Text(text = "firstU32=${record.firstU32LeFields.take(8).joinToString()}")
+                            record.candidateBounds?.let { bounds ->
+                                Text(text = "boundsProbe rel=${bounds.sourceRelativeOffset} values=${bounds.values.joinToString()}")
+                            }
+                            record.candidatePointRun?.let { run ->
+                                Text(text = "pointRun ${run.encoding} relPayload=${run.relativeOffsetInPayload} relRecord=${run.relativeOffsetInRecord} pairs=${run.pairCount}")
+                                Text(text = "pointPreview=${run.previewPairs.joinToString { pair -> "[${pair.joinToString()}]" }}")
+                            }
+                            record.warnings.forEach { warning -> Text(text = "  • $warning") }
+                        }
+                    }
+                    page.binarySummary?.let { summary ->
+                        Text(text = "binarySummary zero=${summary.zeroByteCount} printable=${summary.printableAsciiByteCount} distinct=${summary.distinctByteCount} likelyBinary=${summary.likelyBinary}")
+                    }
+                    Text(text = "first128Hex=${page.firstPreviewHex}")
+                    Text(text = "first128Ascii=${page.firstPreviewAscii}")
+
+                    if (page.candidateStrokeRecordSignals.isNotEmpty()) {
+                        Text(text = "Candidate stroke signals")
+                        page.candidateStrokeRecordSignals.forEach { signal ->
+                            Text(text = "• $signal")
+                        }
+                    }
+
+                    if (page.candidateToolSignals.isNotEmpty()) {
+                        Text(text = "Candidate tool/semantic signals")
+                        page.candidateToolSignals.forEach { signal ->
+                            Text(text = "• $signal")
+                        }
+                    }
+
+                    val markerHits = page.markerHits.filter { it.count > 0 }
+                    if (markerHits.isNotEmpty()) {
+                        Text(text = "TOTALPATH marker hits")
+                        markerHits.forEach { hit ->
+                            Text(text = "${hit.marker}: count=${hit.count} rel=${hit.relativeOffsets.joinToString()} abs=${hit.absoluteOffsets.joinToString()}")
+                            hit.contexts.forEachIndexed { index, context ->
+                                Text(text = "context ${index + 1}: $context")
+                            }
+                        }
+                    }
+
+                    if (page.numericRuns.isNotEmpty()) {
+                        Text(text = "Numeric run probes")
+                        page.numericRuns.forEach { run ->
+                            Text(text = "${run.encoding} abs=${run.absoluteOffset} rel=${run.relativeOffset} count=${run.valueCount} range=${run.minValue}..${run.maxValue}")
+                            Text(text = "values=${run.previewValues.joinToString()}")
+                            Text(text = "reason=${run.reason}")
+                        }
+                    }
+
+                    page.warnings.forEach { warning ->
+                        Text(text = "• $warning")
                     }
                 }
             }
