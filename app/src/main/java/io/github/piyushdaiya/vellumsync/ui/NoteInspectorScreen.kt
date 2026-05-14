@@ -34,7 +34,8 @@ import io.github.piyushdaiya.vellumsync.note.SupernoteNoteInspector
 
 @Composable
 fun NoteInspectorScreen(
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onOpenViewer: (ViewerNoteSelection) -> Unit = {}
 ) {
     val context = LocalContext.current
     val report = remember { mutableStateOf<SupernoteInspectionReport?>(null) }
@@ -104,10 +105,10 @@ fun NoteInspectorScreen(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Text(text = "Supernote .note inspector")
+        Text(text = "Supernote .note diagnostics")
 
         Text(
-            text = "This screen performs read-only marker and container inspection. It does not modify the selected file."
+            text = "Diagnostics are secondary to Viewer Mode. This screen performs read-only marker, parser, and geometry inspection. It does not modify the selected file."
         )
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -132,14 +133,37 @@ fun NoteInspectorScreen(
         }
 
         report.value?.let { inspection ->
-            Button(
-                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
-                onClick = {
-                    pendingExportJson.value = inspection.toJson()
-                    exportLauncher.launch("vellumsync-note-diagnostics-${inspection.sha256.take(12)}.json")
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                    onClick = {
+                        val cachedPath = inspection.cachedCopyPath
+                        if (cachedPath == null) {
+                            exportError.value = "This note has no cached read-only copy to open. Re-import it first."
+                        } else {
+                            onOpenViewer(
+                                ViewerNoteSelection(
+                                    fileName = inspection.fileName,
+                                    sha256 = inspection.sha256,
+                                    notePath = cachedPath,
+                                    fileSizeBytes = inspection.fileSizeBytes
+                                )
+                            )
+                        }
+                    }
+                ) {
+                    Text(text = "Open in viewer")
                 }
-            ) {
-                Text(text = "Export note diagnostics JSON")
+
+                Button(
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                    onClick = {
+                        pendingExportJson.value = inspection.toJson()
+                        exportLauncher.launch("vellumsync-note-diagnostics-${inspection.sha256.take(12)}.json")
+                    }
+                ) {
+                    Text(text = "Export diagnostics JSON")
+                }
             }
         }
 

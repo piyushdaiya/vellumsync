@@ -11,12 +11,15 @@ import io.github.piyushdaiya.vellumsync.device.DeviceCapabilityDetector
 
 private enum class Screen {
     DEVICE_CHECK,
-    NOTE_INSPECTOR
+    RECENT_NOTES,
+    NOTE_INSPECTOR,
+    NOTE_VIEWER
 }
 
 @Composable
 fun VellumSyncApp() {
     val currentScreen = remember { mutableStateOf(Screen.DEVICE_CHECK) }
+    val selectedNote = remember { mutableStateOf<ViewerNoteSelection?>(null) }
     val deviceProfile = remember { DeviceCapabilityDetector.detect() }
 
     MaterialTheme {
@@ -24,12 +27,44 @@ fun VellumSyncApp() {
             when (currentScreen.value) {
                 Screen.DEVICE_CHECK -> DeviceCheckScreen(
                     profile = deviceProfile,
-                    onContinue = { currentScreen.value = Screen.NOTE_INSPECTOR }
+                    onContinue = { currentScreen.value = Screen.RECENT_NOTES }
+                )
+
+                Screen.RECENT_NOTES -> RecentNotesScreen(
+                    onBackToDeviceCheck = { currentScreen.value = Screen.DEVICE_CHECK },
+                    onOpenDiagnostics = { currentScreen.value = Screen.NOTE_INSPECTOR },
+                    onOpenViewer = { selection ->
+                        selectedNote.value = selection
+                        currentScreen.value = Screen.NOTE_VIEWER
+                    }
                 )
 
                 Screen.NOTE_INSPECTOR -> NoteInspectorScreen(
-                    onBack = { currentScreen.value = Screen.DEVICE_CHECK }
+                    onBack = { currentScreen.value = Screen.RECENT_NOTES },
+                    onOpenViewer = { selection ->
+                        selectedNote.value = selection
+                        currentScreen.value = Screen.NOTE_VIEWER
+                    }
                 )
+
+                Screen.NOTE_VIEWER -> {
+                    val note = selectedNote.value
+                    if (note == null) {
+                        RecentNotesScreen(
+                            onBackToDeviceCheck = { currentScreen.value = Screen.DEVICE_CHECK },
+                            onOpenDiagnostics = { currentScreen.value = Screen.NOTE_INSPECTOR },
+                            onOpenViewer = { selection ->
+                                selectedNote.value = selection
+                                currentScreen.value = Screen.NOTE_VIEWER
+                            }
+                        )
+                    } else {
+                        NoteViewerScreen(
+                            selection = note,
+                            onBack = { currentScreen.value = Screen.RECENT_NOTES }
+                        )
+                    }
+                }
             }
         }
     }

@@ -4,8 +4,10 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
+import android.view.MotionEvent
 import android.view.View
 import io.github.piyushdaiya.vellumsync.note.SupernoteStrokeGeometryPageReport
+import kotlin.math.hypot
 
 class SupernoteVectorPreviewView(
     context: Context,
@@ -38,6 +40,14 @@ class SupernoteVectorPreviewView(
         strokeWidth = 2f
     }
 
+    private var panX = 0f
+    private var panY = 0f
+    private var zoomMultiplier = 1f
+    private var lastTouchX = 0f
+    private var lastTouchY = 0f
+    private var lastPinchDistance = 0f
+    private var activeGesture = GestureMode.NONE
+
     fun updatePageReport(
         pageReport: SupernoteStrokeGeometryPageReport?,
         transformMode: SupernotePreviewTransformMode = this.transformMode
@@ -45,6 +55,77 @@ class SupernoteVectorPreviewView(
         this.pageReport = pageReport
         this.transformMode = transformMode
         invalidate()
+    }
+
+    fun resetViewport() {
+        panX = 0f
+        panY = 0f
+        zoomMultiplier = 1f
+        invalidate()
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                activeGesture = GestureMode.PAN
+                lastTouchX = event.x
+                lastTouchY = event.y
+                parent?.requestDisallowInterceptTouchEvent(true)
+                return true
+            }
+
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                if (event.pointerCount >= 2) {
+                    activeGesture = GestureMode.PINCH
+                    lastPinchDistance = pointerDistance(event).coerceAtLeast(1f)
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                }
+                return true
+            }
+
+            MotionEvent.ACTION_MOVE -> {
+                if (activeGesture == GestureMode.PINCH && event.pointerCount >= 2) {
+                    val distance = pointerDistance(event).coerceAtLeast(1f)
+                    val scaleDelta = (distance / lastPinchDistance).coerceIn(0.75f, 1.35f)
+                    zoomMultiplier = (zoomMultiplier * scaleDelta).coerceIn(1f, 5f)
+                    lastPinchDistance = distance
+                    invalidate()
+                    return true
+                }
+
+                if (activeGesture == GestureMode.PAN && event.pointerCount == 1) {
+                    panX += event.x - lastTouchX
+                    panY += event.y - lastTouchY
+                    lastTouchX = event.x
+                    lastTouchY = event.y
+                    invalidate()
+                    return true
+                }
+            }
+
+            MotionEvent.ACTION_POINTER_UP -> {
+                if (event.pointerCount <= 2) {
+                    activeGesture = GestureMode.PAN
+                    lastTouchX = event.x
+                    lastTouchY = event.y
+                }
+                return true
+            }
+
+            MotionEvent.ACTION_UP,
+            MotionEvent.ACTION_CANCEL -> {
+                activeGesture = GestureMode.NONE
+                parent?.requestDisallowInterceptTouchEvent(false)
+                performClick()
+                return true
+            }
+        }
+        return true
+    }
+
+    override fun performClick(): Boolean {
+        super.performClick()
+        return true
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -57,11 +138,12 @@ class SupernoteVectorPreviewView(
 
         val viewWidth = width.toFloat().coerceAtLeast(1f)
         val viewHeight = height.toFloat().coerceAtLeast(1f)
-        val scale = minOf(viewWidth / report.pageWidth, viewHeight / report.pageHeight)
+        val baseScale = minOf(viewWidth / report.pageWidth, viewHeight / report.pageHeight)
+        val scale = baseScale * zoomMultiplier
         val drawWidth = report.pageWidth * scale
         val drawHeight = report.pageHeight * scale
-        val left = (viewWidth - drawWidth) / 2f
-        val top = (viewHeight - drawHeight) / 2f
+        val left = (viewWidth - drawWidth) / 2f + panX
+        val top = (viewHeight - drawHeight) / 2f + panY
 
         drawPageFrameAndRuledBackground(
             canvas = canvas,
@@ -97,7 +179,7 @@ class SupernoteVectorPreviewView(
             textPaint
         )
         canvas.drawText(
-            "Transform: ${transformMode.label}",
+            "Transform: ${transformMode.label}  Zoom: ${String.format(java.util.Locale.US, "%.1fx", zoomMultiplier)}",
             24f,
             78f,
             textPaint
@@ -124,5 +206,16 @@ class SupernoteVectorPreviewView(
             canvas.drawLine(left, y, left + drawWidth, y, ruledLinePaint)
             y += lineSpacingPx
         }
+    }
+
+    private fun pointerDistance(event: MotionEvent): Float {
+        if (event.pointerCount < 2) return 1f
+        return hypot(event.getX(1) - event.getX(0), event.getY(1) - event.getY(0))
+    }
+
+    private enum class GestureMode {
+        NONE,
+        PAN,
+        PINCH
     }
 }
