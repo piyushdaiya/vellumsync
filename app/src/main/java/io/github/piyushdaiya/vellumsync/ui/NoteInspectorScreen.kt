@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -21,12 +22,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import io.github.piyushdaiya.vellumsync.note.ImportedNoteCache
 import io.github.piyushdaiya.vellumsync.note.MarkerHit
 import io.github.piyushdaiya.vellumsync.note.SupernoteContainerReport
 import io.github.piyushdaiya.vellumsync.note.SupernoteInspectionReport
 import io.github.piyushdaiya.vellumsync.note.SupernoteVisualReport
 import io.github.piyushdaiya.vellumsync.note.SupernoteTotalPathProbeReport
+import io.github.piyushdaiya.vellumsync.note.SupernoteStrokeGeometryReport
 import io.github.piyushdaiya.vellumsync.note.SupernoteNoteInspector
 
 @Composable
@@ -163,6 +166,7 @@ fun NoteInspectorScreen(
             ContainerParserReportCard(report = inspection.containerReport)
             VisualDecoderReportCard(report = inspection.visualReport)
             TotalPathProbeReportCard(report = inspection.totalPathProbeReport)
+            StrokeGeometryReportCard(report = inspection.strokeGeometryReport)
             MarkerReportCard(markerHits = inspection.markerHits)
         }
     }
@@ -416,6 +420,82 @@ private fun TotalPathProbeReportCard(report: SupernoteTotalPathProbeReport) {
 
                     page.warnings.forEach { warning ->
                         Text(text = "• $warning")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StrokeGeometryReportCard(report: SupernoteStrokeGeometryReport) {
+    val selectedPageIndex = remember { mutableStateOf(0) }
+    val pages = report.pageReports
+    val selectedPage = pages.getOrNull(selectedPageIndex.value.coerceIn(0, (pages.size - 1).coerceAtLeast(0)))
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(text = "Stroke geometry + vector preview v0")
+            Text(text = "Status: ${report.formatStatus}")
+            Text(text = "Pages: ${report.totalPages}")
+            Text(text = "Decoded records: ${report.totalDecodedRecords}")
+            Text(text = "Rendered records: ${report.totalRenderedRecords}")
+            Text(text = "Skipped records: ${report.totalSkippedRecords}")
+            Text(text = "Unknown subtype records: ${report.totalUnknownSubtypeRecords}")
+            Text(text = "Possible eraser/metadata records: ${report.totalPossibleEraserOrMetadataRecords}")
+
+            if (report.warnings.isNotEmpty()) {
+                Text(text = "Geometry warnings")
+                report.warnings.forEach { warning -> Text(text = "• $warning") }
+            }
+
+            if (pages.isNotEmpty()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Button(onClick = {
+                        selectedPageIndex.value = (selectedPageIndex.value - 1).coerceAtLeast(0)
+                    }) {
+                        Text(text = "Prev page")
+                    }
+                    Button(onClick = {
+                        selectedPageIndex.value = (selectedPageIndex.value + 1).coerceAtMost(pages.lastIndex)
+                    }) {
+                        Text(text = "Next page")
+                    }
+                }
+
+                selectedPage?.let { page ->
+                    Text(text = "Preview page ${page.pageNumber}")
+                    Text(text = "Records rendered=${page.renderedRecords}/${page.decodedRecords} skipped=${page.skippedRecords}")
+                    Text(text = "Unknown=${page.unknownSubtypeRecords} possibleEraserOrMetadata=${page.possibleEraserOrMetadataRecords}")
+                    Text(text = "Raw bounds=${page.rawBounds?.minX ?: "?"}..${page.rawBounds?.maxX ?: "?"}, ${page.rawBounds?.minY ?: "?"}..${page.rawBounds?.maxY ?: "?"}")
+                    Text(text = "Transform=${page.transform}")
+
+                    AndroidView(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(520.dp),
+                        factory = { context ->
+                            SupernoteVectorPreviewView(context = context, pageReport = page)
+                        },
+                        update = { view ->
+                            view.updatePageReport(page)
+                        }
+                    )
+
+                    if (page.warnings.isNotEmpty()) {
+                        Text(text = "Page warnings")
+                        page.warnings.forEach { warning -> Text(text = "• $warning") }
+                    }
+
+                    Text(text = "Record summary")
+                    page.records.take(16).forEach { record ->
+                        Text(text = "#${record.recordIndex} ${record.subtype} source=${record.source} renderedPoints=${record.renderedPointCount} decodedPoints=${record.decodedPointCount}")
+                        record.rawBounds?.let { bounds ->
+                            Text(text = "  raw=${bounds.minX}..${bounds.maxX}, ${bounds.minY}..${bounds.maxY}")
+                        }
                     }
                 }
             }

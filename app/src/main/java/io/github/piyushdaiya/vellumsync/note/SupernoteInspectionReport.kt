@@ -45,6 +45,7 @@ data class SupernoteInspectionReport(
     val containerReport: SupernoteContainerReport,
     val visualReport: SupernoteVisualReport,
     val totalPathProbeReport: SupernoteTotalPathProbeReport,
+    val strokeGeometryReport: SupernoteStrokeGeometryReport,
     val compatibilityStatus: String,
     val warnings: List<String>,
     val cachedCopyPath: String?
@@ -78,6 +79,7 @@ data class SupernoteInspectionReport(
             append("\"containerReport\":${containerReport.toJson()},")
             append("\"visualReport\":${visualReport.toJson()},")
             append("\"totalPathProbeReport\":${totalPathProbeReport.toJson()},")
+            append("\"strokeGeometryReport\":${strokeGeometryReport.toJson()},")
             append("\"markerHits\":[")
             append(markerHits.joinToString(separator = ",") { it.toJson() })
             append("]")

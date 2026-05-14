@@ -358,7 +358,7 @@ object SupernoteTotalPathStrokeProbe {
         }
         val status = when {
             pagesWithTotalPath == 0 -> "No TOTALPATH payloads detected."
-            else -> "TOTALPATH record-chain decoder and point-array decode v0 built; vector rendering is deferred."
+            else -> "TOTALPATH record-boundary model, record-chain decoder, and point-array decode v0 built; vector rendering is deferred."
         }
         return SupernoteTotalPathProbeReport(
             formatStatus = status,
