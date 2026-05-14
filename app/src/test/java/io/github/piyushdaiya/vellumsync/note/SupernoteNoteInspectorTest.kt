@@ -12,12 +12,12 @@ class SupernoteNoteInspectorTest {
             NOTE
             APPLY_EQUIPMENT:A5X
             PAGE1
+            PAGESTYLE
             MAINLAYER
             BGLAYER
             LAYERINFO
             LAYERSEQ
             TOTALPATH
-            PAGESTYLE
             TITLE
             KEYWORD
             LINK
@@ -33,6 +33,9 @@ class SupernoteNoteInspectorTest {
         assertEquals("SN_FILE_VER_20230015", report.versionMarker)
         assertEquals("A5X", report.detectedEquipment)
         assertEquals(1, report.estimatedPageCount)
+        assertTrue(report.sha256.length == 64)
+        assertTrue(report.headerPreviewHex.isNotBlank())
+        assertTrue(report.headerPreviewAscii.isNotBlank())
         assertTrue(report.hasNoteMarker)
         assertTrue(report.hasMainLayer)
         assertTrue(report.hasBackgroundLayer)
@@ -44,6 +47,21 @@ class SupernoteNoteInspectorTest {
         assertTrue(report.hasKeywordMetadata)
         assertTrue(report.hasLinkMetadata)
         assertTrue(report.hasStarMetadata)
+        assertTrue(report.markerHits.any { it.marker == "TOTALPATH" && it.count == 1 })
+    }
+
+    @Test
+    fun reportsUnknownFileWithoutCrashing() {
+        val bytes = "not a supernote file".toByteArray(Charsets.ISO_8859_1)
+
+        val report = SupernoteNoteInspector.inspect(
+            fileName = "not-note.bin",
+            fileSizeBytes = bytes.size.toLong(),
+            bytes = bytes
+        )
+
+        assertEquals(null, report.versionMarker)
+        assertEquals(0, report.estimatedPageCount)
+        assertTrue(report.warnings.isNotEmpty())
     }
 }
-

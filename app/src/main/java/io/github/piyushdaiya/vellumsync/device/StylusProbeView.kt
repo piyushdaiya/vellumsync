@@ -8,29 +8,38 @@ import android.view.View
 
 class StylusProbeView(
     context: Context,
-    private val onStylusDetected: () -> Unit
+    private val onProbe: (StylusProbeResult) -> Unit
 ) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = 42f
         strokeWidth = 4f
     }
 
-    private var lastToolType: Int = MotionEvent.TOOL_TYPE_UNKNOWN
-    private var lastX: Float = 0f
-    private var lastY: Float = 0f
+    private var lastResult = StylusProbeResult(
+        toolTypeName = "UNKNOWN",
+        stylusDetected = false,
+        x = 0f,
+        y = 0f,
+        pressure = 0f,
+        size = 0f
+    )
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        val index = event.actionIndex.coerceAtLeast(0)
-        lastToolType = event.getToolType(index)
-        lastX = event.x
-        lastY = event.y
+        val index = event.actionIndex.coerceAtLeast(0).coerceAtMost(event.pointerCount - 1)
+        val toolType = event.getToolType(index)
+        val stylusDetected = toolType == MotionEvent.TOOL_TYPE_STYLUS ||
+            toolType == MotionEvent.TOOL_TYPE_ERASER
 
-        if (lastToolType == MotionEvent.TOOL_TYPE_STYLUS ||
-            lastToolType == MotionEvent.TOOL_TYPE_ERASER
-        ) {
-            onStylusDetected()
-        }
+        lastResult = StylusProbeResult(
+            toolTypeName = toolTypeName(toolType),
+            stylusDetected = stylusDetected,
+            x = event.getX(index),
+            y = event.getY(index),
+            pressure = event.getPressure(index),
+            size = event.getSize(index)
+        )
 
+        onProbe(lastResult)
         invalidate()
         return true
     }
@@ -38,15 +47,41 @@ class StylusProbeView(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
-        val label = when (lastToolType) {
-            MotionEvent.TOOL_TYPE_STYLUS -> "Stylus detected"
-            MotionEvent.TOOL_TYPE_ERASER -> "Stylus eraser detected"
-            MotionEvent.TOOL_TYPE_FINGER -> "Finger detected"
-            MotionEvent.TOOL_TYPE_MOUSE -> "Mouse detected"
+        val label = when (lastResult.toolTypeName) {
+            "STYLUS" -> "Stylus detected"
+            "ERASER" -> "Stylus eraser detected"
+            "FINGER" -> "Finger detected"
+            "MOUSE" -> "Mouse detected"
             else -> "Touch this area with your pen"
         }
 
         canvas.drawText(label, 32f, 72f, paint)
-        canvas.drawText("x=$lastX y=$lastY", 32f, 132f, paint)
+        canvas.drawText("x=${lastResult.x} y=${lastResult.y}", 32f, 132f, paint)
+        canvas.drawText(
+            "pressure=${lastResult.pressure} size=${lastResult.size}",
+            32f,
+            192f,
+            paint
+        )
+    }
+
+    private fun toolTypeName(toolType: Int): String {
+        return when (toolType) {
+            MotionEvent.TOOL_TYPE_STYLUS -> "STYLUS"
+            MotionEvent.TOOL_TYPE_ERASER -> "ERASER"
+            MotionEvent.TOOL_TYPE_FINGER -> "FINGER"
+            MotionEvent.TOOL_TYPE_MOUSE -> "MOUSE"
+            MotionEvent.TOOL_TYPE_UNKNOWN -> "UNKNOWN"
+            else -> "TOOL_$toolType"
+        }
     }
 }
+
+data class StylusProbeResult(
+    val toolTypeName: String,
+    val stylusDetected: Boolean,
+    val x: Float,
+    val y: Float,
+    val pressure: Float,
+    val size: Float
+)
