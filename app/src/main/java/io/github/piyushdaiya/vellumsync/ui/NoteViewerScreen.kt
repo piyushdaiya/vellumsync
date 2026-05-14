@@ -25,6 +25,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import io.github.piyushdaiya.vellumsync.note.ImportedNoteCache
+import io.github.piyushdaiya.vellumsync.note.LocalAnnotationOverlayStore
+import io.github.piyushdaiya.vellumsync.note.LocalAnnotationStroke
 import io.github.piyushdaiya.vellumsync.note.SupernoteInspectionReport
 import io.github.piyushdaiya.vellumsync.note.SupernoteNoteInspector
 import io.github.piyushdaiya.vellumsync.note.SupernoteStrokeGeometryPageReport
@@ -79,6 +81,23 @@ fun NoteViewerScreen(
         currentPageIndex.value = safeIndex
     }
     val selectedPage = pages.getOrNull(safeIndex)
+    val selectedPageNumber = selectedPage?.pageNumber ?: 1
+    val overlayEnabled = remember(selection.sha256) { mutableStateOf(false) }
+    val overlayStrokes = remember(selection.sha256, selectedPageNumber) {
+        mutableStateOf(LocalAnnotationOverlayStore.loadPage(context, selection.sha256, selectedPageNumber))
+    }
+    val saveOverlayStrokes: (List<LocalAnnotationStroke>) -> Unit = { strokes ->
+        overlayStrokes.value = strokes
+        selectedPage?.let { page ->
+            LocalAnnotationOverlayStore.savePage(
+                context = context,
+                noteSha256 = selection.sha256,
+                pageNumber = page.pageNumber,
+                transformModeId = selectedTransformMode.value.id,
+                strokes = strokes
+            )
+        }
+    }
 
     if (fullScreenPreview.value && report != null && selectedPage != null) {
         FullScreenPreview(
@@ -97,7 +116,20 @@ fun NoteViewerScreen(
             },
             onNext = {
                 currentPageIndex.value = (currentPageIndex.value + 1).coerceAtMost(pages.lastIndex)
-            }
+            },
+            overlayEnabled = overlayEnabled.value,
+            overlayStrokes = overlayStrokes.value,
+            onOverlayToggle = { overlayEnabled.value = !overlayEnabled.value },
+            onUndoOverlay = {
+                if (overlayStrokes.value.isNotEmpty()) {
+                    saveOverlayStrokes(overlayStrokes.value.dropLast(1))
+                }
+            },
+            onClearOverlay = {
+                LocalAnnotationOverlayStore.clearPage(context, selection.sha256, selectedPage.pageNumber)
+                saveOverlayStrokes(emptyList())
+            },
+            onOverlayChanged = saveOverlayStrokes
         )
         return
     }
@@ -114,7 +146,12 @@ fun NoteViewerScreen(
             onBack = onBack,
             onExportDiagnostics = {
                 if (report != null) {
-                    pendingExportJson.value = report.toJson()
+                    pendingExportJson.value = LocalAnnotationOverlayStore.appendOverlayDiagnostics(
+                        baseReportJson = report.toJson(),
+                        context = context,
+                        noteSha256 = selection.sha256,
+                        totalPages = report.strokeGeometryReport.totalPages
+                    )
                     exportLauncher.launch("vellumsync-note-diagnostics-${report.sha256.take(12)}.json")
                 }
             }
@@ -155,6 +192,22 @@ fun NoteViewerScreen(
                     }
                 )
 
+                OverlayControlsCard(
+                    enabled = overlayEnabled.value,
+                    strokeCount = overlayStrokes.value.size,
+                    pointCount = overlayStrokes.value.sumOf { it.points.size },
+                    onToggle = { overlayEnabled.value = !overlayEnabled.value },
+                    onUndo = {
+                        if (overlayStrokes.value.isNotEmpty()) {
+                            saveOverlayStrokes(overlayStrokes.value.dropLast(1))
+                        }
+                    },
+                    onClear = {
+                        LocalAnnotationOverlayStore.clearPage(context, selection.sha256, selectedPage.pageNumber)
+                        saveOverlayStrokes(emptyList())
+                    }
+                )
+
                 PagePreviewCard(
                     page = selectedPage,
                     pageIndex = safeIndex,
@@ -166,7 +219,10 @@ fun NoteViewerScreen(
                     onNext = {
                         currentPageIndex.value = (currentPageIndex.value + 1).coerceAtMost(pages.lastIndex)
                     },
-                    onFullScreen = { fullScreenPreview.value = true }
+                    onFullScreen = { fullScreenPreview.value = true },
+                    overlayEnabled = overlayEnabled.value,
+                    overlayStrokes = overlayStrokes.value,
+                    onOverlayChanged = saveOverlayStrokes
                 )
 
                 ViewerDetailsCard(
@@ -222,7 +278,10 @@ private fun PagePreviewCard(
     transformMode: SupernotePreviewTransformMode,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
-    onFullScreen: () -> Unit
+    onFullScreen: () -> Unit,
+    overlayEnabled: Boolean,
+    overlayStrokes: List<LocalAnnotationStroke>,
+    onOverlayChanged: (List<LocalAnnotationStroke>) -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -252,13 +311,19 @@ private fun PagePreviewCard(
                     SupernoteVectorPreviewView(
                         context = androidContext,
                         pageReport = page,
-                        transformMode = transformMode
+                        transformMode = transformMode,
+                        overlayEnabled = overlayEnabled,
+                        overlayStrokes = overlayStrokes,
+                        onOverlayChanged = onOverlayChanged
                     )
                 },
                 update = { view ->
                     view.updatePageReport(
                         pageReport = page,
-                        transformMode = transformMode
+                        transformMode = transformMode,
+                        overlayEnabled = overlayEnabled,
+                        overlayStrokes = overlayStrokes,
+                        onOverlayChanged = onOverlayChanged
                     )
                 }
             )
@@ -277,7 +342,13 @@ private fun FullScreenPreview(
     onTransformSelect: (SupernotePreviewTransformMode) -> Unit,
     onExit: () -> Unit,
     onPrevious: () -> Unit,
-    onNext: () -> Unit
+    onNext: () -> Unit,
+    overlayEnabled: Boolean,
+    overlayStrokes: List<LocalAnnotationStroke>,
+    onOverlayToggle: () -> Unit,
+    onUndoOverlay: () -> Unit,
+    onClearOverlay: () -> Unit,
+    onOverlayChanged: (List<LocalAnnotationStroke>) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -302,6 +373,13 @@ private fun FullScreenPreview(
             selected = transformMode,
             onSelect = onTransformSelect
         )
+        OverlayControlsCompactRow(
+            enabled = overlayEnabled,
+            strokeCount = overlayStrokes.size,
+            onToggle = onOverlayToggle,
+            onUndo = onUndoOverlay,
+            onClear = onClearOverlay
+        )
         AndroidView(
             modifier = Modifier
                 .fillMaxWidth()
@@ -310,13 +388,19 @@ private fun FullScreenPreview(
                 SupernoteVectorPreviewView(
                     context = androidContext,
                     pageReport = page,
-                    transformMode = transformMode
+                    transformMode = transformMode,
+                    overlayEnabled = overlayEnabled,
+                    overlayStrokes = overlayStrokes,
+                    onOverlayChanged = onOverlayChanged
                 )
             },
             update = { view ->
                 view.updatePageReport(
                     pageReport = page,
-                    transformMode = transformMode
+                    transformMode = transformMode,
+                    overlayEnabled = overlayEnabled,
+                    overlayStrokes = overlayStrokes,
+                    onOverlayChanged = onOverlayChanged
                 )
             }
         )
@@ -367,6 +451,78 @@ private fun TransformModeButtonRow(
     }
 }
 
+
+@Composable
+private fun OverlayControlsCard(
+    enabled: Boolean,
+    strokeCount: Int,
+    pointCount: Int,
+    onToggle: () -> Unit,
+    onUndo: () -> Unit,
+    onClear: () -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(text = "Local annotation overlay")
+            Text(
+                text = if (enabled) {
+                    "Overlay is ON. Use the Boox pen/stylus to write. Finger touches are ignored while overlay is on."
+                } else {
+                    "Overlay is OFF. Original Supernote .note remains read-only."
+                }
+            )
+            Text(text = "This page overlay: $strokeCount stroke(s), $pointCount point(s)")
+            OverlayControlsCompactRow(
+                enabled = enabled,
+                strokeCount = strokeCount,
+                onToggle = onToggle,
+                onUndo = onUndo,
+                onClear = onClear
+            )
+        }
+    }
+}
+
+@Composable
+private fun OverlayControlsCompactRow(
+    enabled: Boolean,
+    strokeCount: Int,
+    onToggle: () -> Unit,
+    onUndo: () -> Unit,
+    onClear: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Button(
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            onClick = onToggle
+        ) {
+            Text(text = if (enabled) "Overlay on" else "Overlay off")
+        }
+        Button(
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            onClick = onUndo,
+            enabled = strokeCount > 0
+        ) {
+            Text(text = "Undo overlay")
+        }
+        Button(
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            onClick = onClear,
+            enabled = strokeCount > 0
+        ) {
+            Text(text = "Clear page")
+        }
+    }
+}
+
 @Composable
 private fun ViewerDetailsCard(
     report: SupernoteInspectionReport,
@@ -396,6 +552,7 @@ private fun ViewerDetailsCard(
                 Text(text = "Decoded records: ${report.strokeGeometryReport.totalDecodedRecords}")
                 Text(text = "Rendered records: ${report.strokeGeometryReport.totalRenderedRecords}")
                 Text(text = "Skipped records: ${report.strokeGeometryReport.totalSkippedRecords}")
+                Text(text = "Overlay sidecars: exported in diagnostics JSON when present")
 
                 Text(text = "Page render details")
                 Text(text = "Page: ${page.pageNumber}")
