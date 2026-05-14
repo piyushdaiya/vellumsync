@@ -23,7 +23,12 @@ object SupernoteNoteInspector {
         "TOTALPATH",
         "TITLE",
         "KEYWORD",
+        "EXTERNALLINKINFO",
+        "LINKTYPE",
+        "LINKBITMAP",
+        "LINKRECT",
         "LINK",
+        "FIVESTAR",
         "STAR"
     )
 
@@ -35,22 +40,24 @@ object SupernoteNoteInspector {
     ): SupernoteInspectionReport {
         val ascii = bytes.toAsciiLikeString()
         val markerHits = markers.map { marker -> markerHit(bytes, marker) }
+        val containerReport = SupernoteContainerParser.parse(bytes)
 
-        val versionMarker = versionRegex.find(ascii)?.value
-        val detectedEquipment = detectEquipment(ascii)
-        val estimatedPageCount = estimatePageCount(ascii)
+        val versionMarker = containerReport.header.versionMarker ?: versionRegex.find(ascii)?.value
+        val detectedEquipment = containerReport.header.applyEquipment ?: detectEquipment(ascii)
+        val estimatedPageCount = containerReport.pageCount
 
-        val hasNoteMarker = hasMarker(markerHits, "NOTE")
+        val hasNoteMarker = containerReport.header.fileType == "NOTE" || hasMarker(markerHits, "NOTE")
         val hasMainLayer = hasMarker(markerHits, "MAINLAYER")
         val hasBackgroundLayer = hasMarker(markerHits, "BGLAYER")
-        val hasLayerInfo = hasMarker(markerHits, "LAYERINFO")
-        val hasLayerSequence = hasMarker(markerHits, "LAYERSEQ")
-        val hasTotalPath = hasMarker(markerHits, "TOTALPATH")
-        val hasPageStyle = hasMarker(markerHits, "PAGESTYLE")
-        val hasTitleMetadata = hasMarker(markerHits, "TITLE")
-        val hasKeywordMetadata = hasMarker(markerHits, "KEYWORD")
-        val hasLinkMetadata = hasMarker(markerHits, "LINK")
-        val hasStarMetadata = hasMarker(markerHits, "STAR")
+        val hasLayerInfo = containerReport.pageSections.any { it.layerInfoPresent } || hasMarker(markerHits, "LAYERINFO")
+        val hasLayerSequence = containerReport.pageSections.any { it.layerSeq != null } || hasMarker(markerHits, "LAYERSEQ")
+        val hasTotalPath = containerReport.pageSections.any { it.layerOffsets.totalPathOffset != null } || hasMarker(markerHits, "TOTALPATH")
+        val hasPageStyle = containerReport.pageSections.any { it.pageStyle != null } || hasMarker(markerHits, "PAGESTYLE")
+        val hasTitleMetadata = containerReport.titleMetadataPresent
+        val hasKeywordMetadata = containerReport.keywordMetadataPresent
+        val hasExternalLinkInfoField = containerReport.externalLinkInfoPresent
+        val hasLinkMetadata = containerReport.realLinkMetadataPresent
+        val hasStarMetadata = containerReport.starMetadataPresent
 
         val warnings = buildList {
             if (versionMarker == null) {
@@ -63,12 +70,13 @@ object SupernoteNoteInspector {
                 add("TOTALPATH marker was not detected; stroke-level decoding may not be possible.")
             }
             if (estimatedPageCount == 0) {
-                add("No PAGE number markers were detected.")
+                add("No <PAGEn:offset> page table entries were detected.")
             }
-            if (hasLinkMetadata && estimatedPageCount <= 1) {
-                add("LINK marker found in a small note. Review offset context to confirm whether this is real link metadata or a broad marker hit.")
+            if (!hasLinkMetadata && hasExternalLinkInfoField) {
+                add("EXTERNALLINKINFO field is present, but no real link metadata markers were detected.")
             }
-        }
+            addAll(containerReport.parserWarnings)
+        }.distinct()
 
         val compatibilityStatus = when {
             versionMarker == "SN_FILE_VER_20230015" && hasNoteMarker ->
@@ -100,8 +108,10 @@ object SupernoteNoteInspector {
             hasTitleMetadata = hasTitleMetadata,
             hasKeywordMetadata = hasKeywordMetadata,
             hasLinkMetadata = hasLinkMetadata,
+            hasExternalLinkInfoField = hasExternalLinkInfoField,
             hasStarMetadata = hasStarMetadata,
             markerHits = markerHits,
+            containerReport = containerReport,
             compatibilityStatus = compatibilityStatus,
             warnings = warnings,
             cachedCopyPath = cachedCopyPath
@@ -162,11 +172,6 @@ object SupernoteNoteInspector {
     private fun detectEquipment(ascii: String): String? {
         return listOf("A5X2", "A6X2", "A5X", "A6X", "NOMAD", "MANTA")
             .firstOrNull { marker -> ascii.contains(marker, ignoreCase = true) }
-    }
-
-    private fun estimatePageCount(ascii: String): Int {
-        val numberedPages = Regex("PAGE[0-9]+").findAll(ascii).map { it.value }.toSet()
-        return numberedPages.size
     }
 
     private fun sha256(bytes: ByteArray): String {

@@ -23,6 +23,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import io.github.piyushdaiya.vellumsync.note.ImportedNoteCache
 import io.github.piyushdaiya.vellumsync.note.MarkerHit
+import io.github.piyushdaiya.vellumsync.note.SupernoteContainerReport
 import io.github.piyushdaiya.vellumsync.note.SupernoteInspectionReport
 import io.github.piyushdaiya.vellumsync.note.SupernoteNoteInspector
 
@@ -101,7 +102,7 @@ fun NoteInspectorScreen(
         Text(text = "Supernote .note inspector")
 
         Text(
-            text = "This screen performs read-only marker inspection. It does not modify the selected file."
+            text = "This screen performs read-only marker and container inspection. It does not modify the selected file."
         )
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -157,6 +158,7 @@ fun NoteInspectorScreen(
 
         report.value?.let { inspection ->
             InspectionReportCard(report = inspection)
+            ContainerParserReportCard(report = inspection.containerReport)
             MarkerReportCard(markerHits = inspection.markerHits)
         }
     }
@@ -186,7 +188,8 @@ private fun InspectionReportCard(report: SupernoteInspectionReport) {
             Text(text = "PAGESTYLE: ${report.hasPageStyle}")
             Text(text = "TITLE metadata: ${report.hasTitleMetadata}")
             Text(text = "KEYWORD metadata: ${report.hasKeywordMetadata}")
-            Text(text = "LINK metadata: ${report.hasLinkMetadata}")
+            Text(text = "Real LINK metadata: ${report.hasLinkMetadata}")
+            Text(text = "EXTERNALLINKINFO field: ${report.hasExternalLinkInfoField}")
             Text(text = "STAR metadata: ${report.hasStarMetadata}")
             Text(text = "Cached copy: ${report.cachedCopyPath ?: "not cached"}")
             Text(text = "Status: ${report.compatibilityStatus}")
@@ -195,6 +198,57 @@ private fun InspectionReportCard(report: SupernoteInspectionReport) {
                 Text(text = "Warnings")
                 report.warnings.forEach { warning ->
                     Text(text = "• $warning")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ContainerParserReportCard(report: SupernoteContainerReport) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(text = "Structured container parser v0")
+            Text(text = "Version: ${report.header.versionMarker ?: "not parsed"}")
+            Text(text = "Module label: ${report.header.moduleLabel ?: "not parsed"}")
+            Text(text = "File type: ${report.header.fileType ?: "not parsed"}")
+            Text(text = "Apply equipment: ${report.header.applyEquipment ?: "not parsed"}")
+            Text(text = "Final operation page: ${report.header.finalOperationPage ?: "not parsed"}")
+            Text(text = "Final operation layer: ${report.header.finalOperationLayer ?: "not parsed"}")
+            Text(text = "File ID: ${report.header.fileId ?: "not parsed"}")
+            Text(text = "Page table count: ${report.pageCount}")
+            Text(text = "Real link metadata: ${report.realLinkMetadataPresent}")
+            Text(text = "EXTERNALLINKINFO field: ${report.externalLinkInfoPresent}")
+
+            if (report.parserWarnings.isNotEmpty()) {
+                Text(text = "Parser warnings")
+                report.parserWarnings.forEach { warning ->
+                    Text(text = "• $warning")
+                }
+            }
+
+            Text(text = "Page table")
+            report.pageReferences.forEach { page ->
+                Text(text = "PAGE${page.pageNumber}: section offset=${page.pageSectionOffset}")
+            }
+
+            Text(text = "Page section index")
+            report.pageSections.forEach { page ->
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(text = "Page ${page.pageNumber}")
+                    Text(text = "style=${page.pageStyle ?: "not parsed"}")
+                    Text(text = "layerSeq=${page.layerSeq ?: "not parsed"}")
+                    Text(text = "layerInfoOffset=${page.layerInfoOffset ?: "not parsed"}")
+                    Text(text = "MAINLAYER=${page.layerOffsets.mainLayerOffset ?: "not parsed"}")
+                    Text(text = "BGLAYER=${page.layerOffsets.backgroundLayerOffset ?: "not parsed"}")
+                    Text(text = "LAYER1=${page.layerOffsets.layer1Offset ?: "not parsed"}")
+                    Text(text = "LAYER2=${page.layerOffsets.layer2Offset ?: "not parsed"}")
+                    Text(text = "LAYER3=${page.layerOffsets.layer3Offset ?: "not parsed"}")
+                    Text(text = "TOTALPATH=${page.layerOffsets.totalPathOffset ?: "not parsed"}")
+                    Text(text = "realLink=${page.realLinkMetadataPresent} externalLinkField=${page.externalLinkInfoPresent}")
                 }
             }
         }

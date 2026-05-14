@@ -19,13 +19,19 @@ object DeviceCapabilityDetector {
             productDevice = productDevice
         )
 
-        val stylusInputDevices = inputDevices.filter { it.category == InputDeviceCategory.STYLUS }
+        val stylusInputDevices = inputDevices.filter {
+            it.category == InputDeviceCategory.STYLUS_DIGITIZER
+        }
         val stylusDetected = stylusInputDevices.isNotEmpty()
 
         val status = when {
             stylusDetected -> StylusSupportStatus.DETECTED
             knownBooxTarget -> StylusSupportStatus.PROBE_REQUIRED
             else -> StylusSupportStatus.UNKNOWN
+        }
+
+        val touchStylusSourceDevices = inputDevices.filter {
+            it.category == InputDeviceCategory.TOUCH_WITH_STYLUS_SOURCE
         }
 
         val notes = buildList {
@@ -38,9 +44,13 @@ object DeviceCapabilityDetector {
             }
 
             if (stylusDetected) {
-                add("Stylus-like input devices detected: ${stylusInputDevices.joinToString { it.name }}.")
+                add("Pen digitizer devices detected: ${stylusInputDevices.joinToString { it.name }}.")
             } else {
-                add("Stylus input was not confirmed from the static input device scan.")
+                add("Dedicated pen digitizer was not confirmed from the static input device scan.")
+            }
+
+            if (touchStylusSourceDevices.isNotEmpty()) {
+                add("Touch devices with stylus source flags detected separately: ${touchStylusSourceDevices.joinToString { it.name }}.")
             }
 
             add("Use the pen probe area to confirm MotionEvent tool type from the physical pen.")
@@ -89,11 +99,11 @@ object DeviceCapabilityDetector {
         val supportsStylusSource =
             sources and InputDevice.SOURCE_STYLUS == InputDevice.SOURCE_STYLUS
 
-        val hasStylusName =
-            name.contains("stylus") ||
-                name.contains("pen") ||
-                name.contains("wacom") ||
+        val hasDedicatedDigitizerName =
+            name.contains("wacom") ||
                 name.contains("digitizer") ||
+                name.contains("stylus") ||
+                name.contains("pen") ||
                 name.contains("emp")
 
         val hasTouchName =
@@ -110,8 +120,10 @@ object DeviceCapabilityDetector {
                 sourceNames.contains("TRACKBALL")
 
         return when {
-            supportsStylusSource || hasStylusName -> InputDeviceCategory.STYLUS
+            hasDedicatedDigitizerName -> InputDeviceCategory.STYLUS_DIGITIZER
+            hasTouchName && supportsStylusSource -> InputDeviceCategory.TOUCH_WITH_STYLUS_SOURCE
             hasTouchName || supportsTouchscreen -> InputDeviceCategory.TOUCH
+            supportsStylusSource -> InputDeviceCategory.TOUCH_WITH_STYLUS_SOURCE
             device.keyboardType != InputDevice.KEYBOARD_TYPE_NONE || sourceNames.contains("KEYBOARD") ->
                 InputDeviceCategory.KEYBOARD
             supportsPointer -> InputDeviceCategory.POINTER

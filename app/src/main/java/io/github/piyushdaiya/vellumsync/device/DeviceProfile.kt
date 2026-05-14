@@ -10,7 +10,8 @@ enum class StylusSupportStatus {
 }
 
 enum class InputDeviceCategory {
-    STYLUS,
+    STYLUS_DIGITIZER,
+    TOUCH_WITH_STYLUS_SOURCE,
     TOUCH,
     POINTER,
     KEYBOARD,
@@ -53,14 +54,19 @@ data class DeviceProfile(
     val inputDevices: List<InputDeviceDiagnostic>
 ) {
     val stylusDevices: List<InputDeviceDiagnostic>
-        get() = inputDevices.filter { it.category == InputDeviceCategory.STYLUS }
+        get() = inputDevices.filter { it.category == InputDeviceCategory.STYLUS_DIGITIZER }
 
     val touchDevices: List<InputDeviceDiagnostic>
-        get() = inputDevices.filter { it.category == InputDeviceCategory.TOUCH }
+        get() = inputDevices.filter {
+            it.category == InputDeviceCategory.TOUCH ||
+                it.category == InputDeviceCategory.TOUCH_WITH_STYLUS_SOURCE
+        }
 
     val otherDevices: List<InputDeviceDiagnostic>
         get() = inputDevices.filter {
-            it.category != InputDeviceCategory.STYLUS && it.category != InputDeviceCategory.TOUCH
+            it.category != InputDeviceCategory.STYLUS_DIGITIZER &&
+                it.category != InputDeviceCategory.TOUCH &&
+                it.category != InputDeviceCategory.TOUCH_WITH_STYLUS_SOURCE
         }
 
     fun toDiagnosticsJson(stylusProbeConfirmed: Boolean): String {

@@ -39,8 +39,10 @@ data class SupernoteInspectionReport(
     val hasTitleMetadata: Boolean,
     val hasKeywordMetadata: Boolean,
     val hasLinkMetadata: Boolean,
+    val hasExternalLinkInfoField: Boolean,
     val hasStarMetadata: Boolean,
     val markerHits: List<MarkerHit>,
+    val containerReport: SupernoteContainerReport,
     val compatibilityStatus: String,
     val warnings: List<String>,
     val cachedCopyPath: String?
@@ -66,10 +68,12 @@ data class SupernoteInspectionReport(
             append("\"hasTitleMetadata\":$hasTitleMetadata,")
             append("\"hasKeywordMetadata\":$hasKeywordMetadata,")
             append("\"hasLinkMetadata\":$hasLinkMetadata,")
+            append("\"hasExternalLinkInfoField\":$hasExternalLinkInfoField,")
             append("\"hasStarMetadata\":$hasStarMetadata,")
             append("\"compatibilityStatus\":${JsonText.quote(compatibilityStatus)},")
             append("\"warnings\":${JsonText.stringArray(warnings)},")
             append("\"cachedCopyPath\":${JsonText.quote(cachedCopyPath)},")
+            append("\"containerReport\":${containerReport.toJson()},")
             append("\"markerHits\":[")
             append(markerHits.joinToString(separator = ",") { it.toJson() })
             append("]")
