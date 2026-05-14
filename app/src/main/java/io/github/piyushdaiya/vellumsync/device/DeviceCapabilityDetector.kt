@@ -9,9 +9,16 @@ object DeviceCapabilityDetector {
         val model = Build.MODEL.orEmpty()
         val androidRelease = Build.VERSION.RELEASE.orEmpty()
         val sdkInt = Build.VERSION.SDK_INT
+        val productDevice = Build.DEVICE.orEmpty()
 
-        val knownBooxTarget = isKnownBooxLikeTarget(manufacturer, model)
-        val stylusDetected = hasStylusInputDevice()
+        val knownBooxTarget = isKnownBooxLikeTarget(
+            manufacturer = manufacturer,
+            model = model,
+            productDevice = productDevice
+        )
+
+        val stylusInputDevices = findStylusLikeInputDevices()
+        val stylusDetected = stylusInputDevices.isNotEmpty()
 
         val status = when {
             stylusDetected -> StylusSupportStatus.DETECTED
@@ -23,12 +30,18 @@ object DeviceCapabilityDetector {
             if (knownBooxTarget) {
                 add("Known Android e-ink tablet family detected.")
             }
-            if (stylusDetected) {
-                add("Android input device scan reports stylus-like input.")
-            } else {
-                add("Stylus input was not confirmed from the static input device scan.")
+
+            if (isBooxNoteAir2Plus(manufacturer, model, productDevice)) {
+                add("Boox Note Air 2 Plus profile detected: ONYX / NoteAir2P / BOOX.")
             }
-            add("Use the pen probe screen to confirm MotionEvent stylus support.")
+
+            if (stylusDetected) {
+                add("Stylus-like input devices detected: ${stylusInputDevices.joinToString()}.")
+            } else {
+                add("Stylus input was not confirmed from static input device scan.")
+            }
+
+            add("Use the pen probe area to confirm MotionEvent tool type from the physical pen.")
         }
 
         return DeviceProfile(
@@ -36,6 +49,7 @@ object DeviceCapabilityDetector {
             model = model,
             androidRelease = androidRelease,
             sdkInt = sdkInt,
+            productDevice = productDevice,
             stylusSupportStatus = status,
             isKnownEInkTarget = knownBooxTarget,
             compatibilityNotes = notes
@@ -44,27 +58,50 @@ object DeviceCapabilityDetector {
 
     private fun isKnownBooxLikeTarget(
         manufacturer: String,
-        model: String
+        model: String,
+        productDevice: String
     ): Boolean {
-        val normalized = "$manufacturer $model".lowercase()
+        val normalized = "$manufacturer $model $productDevice".lowercase()
         return normalized.contains("onyx") ||
                 normalized.contains("boox") ||
+                normalized.contains("noteair") ||
                 normalized.contains("note air")
     }
 
-    private fun hasStylusInputDevice(): Boolean {
+    private fun isBooxNoteAir2Plus(
+        manufacturer: String,
+        model: String,
+        productDevice: String
+    ): Boolean {
+        return manufacturer.equals("ONYX", ignoreCase = true) &&
+                model.equals("NoteAir2P", ignoreCase = true) &&
+                productDevice.equals("BOOX", ignoreCase = true)
+    }
+
+    private fun findStylusLikeInputDevices(): List<String> {
         return InputDevice.getDeviceIds()
             .asSequence()
             .mapNotNull { id -> InputDevice.getDevice(id) }
-            .any { device ->
-                val sources = device.sources
-                val supportsStylusSource =
-                    sources and InputDevice.SOURCE_STYLUS == InputDevice.SOURCE_STYLUS
-                val supportsTouchscreen =
-                    sources and InputDevice.SOURCE_TOUCHSCREEN == InputDevice.SOURCE_TOUCHSCREEN
+            .filter { device -> isStylusLikeDevice(device) }
+            .map { device -> device.name }
+            .distinct()
+            .toList()
+    }
 
-                supportsStylusSource || device.name.contains("stylus", ignoreCase = true) || supportsTouchscreen
-            }
+    private fun isStylusLikeDevice(device: InputDevice): Boolean {
+        val sources = device.sources
+        val name = device.name.lowercase()
+
+        val supportsStylusSource =
+            sources and InputDevice.SOURCE_STYLUS == InputDevice.SOURCE_STYLUS
+
+        val hasStylusName =
+            name.contains("stylus") ||
+                    name.contains("pen") ||
+                    name.contains("wacom") ||
+                    name.contains("digitizer") ||
+                    name.contains("emp")
+
+        return supportsStylusSource || hasStylusName
     }
 }
-

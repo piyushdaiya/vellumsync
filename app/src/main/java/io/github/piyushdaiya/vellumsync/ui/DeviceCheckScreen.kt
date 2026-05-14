@@ -62,6 +62,7 @@ fun DeviceCheckScreen(
             ) {
                 Text(text = "Manufacturer: ${profile.manufacturer}")
                 Text(text = "Model: ${profile.model}")
+                Text(text = "Product device: ${profile.productDevice}")
                 Text(text = "Android: ${profile.androidRelease} / SDK ${profile.sdkInt}")
                 Text(text = "Known e-ink target: ${profile.isKnownEInkTarget}")
                 Text(text = "Stylus status: ${if (stylusConfirmed.value) "DETECTED" else profile.stylusSupportStatus}")

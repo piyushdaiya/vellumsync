@@ -12,8 +12,8 @@ data class DeviceProfile(
     val model: String,
     val androidRelease: String,
     val sdkInt: Int,
+    val productDevice: String = "",
     val stylusSupportStatus: StylusSupportStatus,
     val isKnownEInkTarget: Boolean,
     val compatibilityNotes: List<String>
 )
-
