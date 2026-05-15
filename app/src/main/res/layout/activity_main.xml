@@ -1,0 +1,225 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/vellumsync_note_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/eink_background">
+
+    <LinearLayout
+        android:id="@+id/top_document_bar"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/top_bar_height"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:background="@color/eink_background">
+
+        <TextView
+            android:id="@+id/button_back"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:gravity="center"
+            android:text="←"
+            android:textColor="@color/eink_text_secondary"
+            android:textSize="24sp"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center_vertical"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp">
+
+            <TextView
+                android:id="@+id/text_note_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="VellumSync"
+                android:textColor="@color/eink_text_primary"
+                android:textSize="@dimen/text_size_title"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/text_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="Read-only base · Overlay visible"
+                android:textColor="@color/eink_text_secondary"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/button_undo"
+            android:layout_width="44dp"
+            android:layout_height="40dp"
+            android:gravity="center"
+            android:text="Undo"
+            android:textColor="@color/eink_text_secondary"
+            android:textSize="11sp"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <TextView
+            android:id="@+id/button_redo"
+            android:layout_width="44dp"
+            android:layout_height="40dp"
+            android:gravity="center"
+            android:text="Redo"
+            android:textColor="@color/eink_disabled"
+            android:textSize="11sp"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <TextView
+            android:id="@+id/text_page_indicator"
+            android:layout_width="64dp"
+            android:layout_height="40dp"
+            android:gravity="center"
+            android:text="1 / 1"
+            android:textColor="@color/eink_text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/button_fullscreen"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:gravity="center"
+            android:text="⛶"
+            android:textColor="@color/eink_text_secondary"
+            android:textSize="18sp"
+            android:clickable="true"
+            android:focusable="true" />
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/eink_border" />
+
+    <LinearLayout
+        android:id="@+id/surface_row"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal"
+        android:background="@color/eink_background">
+
+        <LinearLayout
+            android:id="@+id/tool_rail"
+            android:layout_width="@dimen/rail_width"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp"
+            android:background="@color/eink_background" />
+
+        <View
+            android:id="@+id/rail_divider"
+            android:layout_width="1dp"
+            android:layout_height="match_parent"
+            android:background="@color/eink_border" />
+
+        <FrameLayout
+            android:id="@+id/note_canvas_container"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="@color/eink_background">
+
+            <FrameLayout
+                android:id="@+id/note_canvas_page"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_margin="6dp"
+                android:background="@drawable/bg_note_page">
+
+                <ImageView
+                    android:id="@+id/base_layer"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:visibility="gone"
+                    android:scaleType="fitCenter" />
+
+                <io.github.piyushdaiya.vellumsync.ui.VellumNoteSurfaceView
+                    android:id="@+id/overlay_layer"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent" />
+            </FrameLayout>
+
+            <LinearLayout
+                android:id="@+id/canvas_page_bar"
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:layout_gravity="top"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:background="@color/eink_background">
+
+                <TextView
+                    android:id="@+id/button_previous_page"
+                    android:layout_width="38dp"
+                    android:layout_height="34dp"
+                    android:gravity="center"
+                    android:background="@drawable/bg_text_button"
+                    android:text="‹"
+                    android:textColor="@color/eink_text_primary"
+                    android:textSize="18sp"
+                    android:clickable="true"
+                    android:focusable="true" />
+
+                <TextView
+                    android:id="@+id/button_next_page"
+                    android:layout_width="38dp"
+                    android:layout_height="34dp"
+                    android:layout_marginStart="6dp"
+                    android:gravity="center"
+                    android:background="@drawable/bg_text_button"
+                    android:text="›"
+                    android:textColor="@color/eink_text_primary"
+                    android:textSize="18sp"
+                    android:clickable="true"
+                    android:focusable="true" />
+
+                <TextView
+                    android:id="@+id/text_canvas_status"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:gravity="center"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="Page 1/1 · View"
+                    android:textColor="@color/eink_text_primary"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/button_canvas_fullscreen"
+                    android:layout_width="40dp"
+                    android:layout_height="34dp"
+                    android:gravity="center"
+                    android:background="@drawable/bg_text_button"
+                    android:text="⛶"
+                    android:textColor="@color/eink_text_primary"
+                    android:textSize="16sp"
+                    android:clickable="true"
+                    android:focusable="true" />
+            </LinearLayout>
+
+            <include layout="@layout/layout_floating_panel" />
+        </FrameLayout>
+    </LinearLayout>
+</LinearLayout>

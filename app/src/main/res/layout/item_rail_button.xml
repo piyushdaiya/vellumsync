@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="@dimen/rail_width"
+    android:layout_height="@dimen/rail_button_height"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="4dp"
+    android:background="@drawable/bg_tool_clear"
+    android:clickable="true"
+    android:focusable="true">
+
+    <TextView
+        android:id="@+id/rail_icon"
+        android:layout_width="@dimen/button_touch_target"
+        android:layout_height="32dp"
+        android:gravity="center"
+        android:text="•"
+        android:textColor="@color/eink_text_secondary"
+        android:textSize="20sp"
+        android:includeFontPadding="false" />
+
+    <TextView
+        android:id="@+id/tool_label"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:text="View"
+        android:textAllCaps="false"
+        android:textColor="@color/eink_text_secondary"
+        android:textSize="@dimen/text_size_rail_label" />
+</LinearLayout>

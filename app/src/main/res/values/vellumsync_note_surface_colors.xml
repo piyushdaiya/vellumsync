@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="vls_eink_white">#FFFFFFFF</color>
+    <color name="vls_eink_paper">#FFFFFFFF</color>
+    <color name="vls_eink_border">#FFE0E0E0</color>
+    <color name="vls_eink_text">#FF000000</color>
+    <color name="vls_eink_muted">#FF424242</color>
+    <color name="vls_eink_active_bg">#FFE0E0E0</color>
+    <color name="vls_eink_disabled">#FFBDBDBD</color>
+</resources>

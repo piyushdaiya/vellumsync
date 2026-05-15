@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/floating_panel_container"
+    android:layout_width="@dimen/floating_panel_width"
+    android:layout_height="wrap_content"
+    android:layout_margin="8dp"
+    android:orientation="vertical"
+    android:visibility="gone"
+    android:background="@drawable/bg_floating_panel"
+    android:elevation="2dp">
+
+    <TextView
+        android:id="@+id/panel_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Panel"
+        android:textColor="@color/eink_text_primary"
+        android:textStyle="bold"
+        android:textSize="14sp" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="8dp"
+        android:background="@color/eink_border" />
+
+    <LinearLayout
+        android:id="@+id/panel_content_area"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical" />
+</LinearLayout>

@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/vls_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/vls_eink_white">
+
+    <LinearLayout
+        android:id="@+id/vls_top_bar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:background="@color/vls_eink_white">
+
+        <TextView
+            android:id="@+id/vls_back"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:gravity="center"
+            android:text="←"
+            android:textColor="@color/vls_eink_muted"
+            android:textSize="22sp" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center_vertical"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp">
+
+            <TextView
+                android:id="@+id/vls_note_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="SN_ONE_STROKE.note"
+                android:textColor="@color/vls_eink_text"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/vls_note_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Read-only · Overlay on"
+                android:textColor="@color/vls_eink_muted"
+                android:textSize="10sp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/vls_undo"
+            android:layout_width="44dp"
+            android:layout_height="48dp"
+            android:gravity="center"
+            android:text="Undo"
+            android:textColor="@color/vls_eink_muted"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/vls_redo"
+            android:layout_width="44dp"
+            android:layout_height="48dp"
+            android:gravity="center"
+            android:text="Redo"
+            android:textColor="@color/vls_eink_disabled"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/vls_page_indicator"
+            android:layout_width="62dp"
+            android:layout_height="48dp"
+            android:gravity="center"
+            android:text="1 / 9"
+            android:textColor="@color/vls_eink_text"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/vls_full_screen"
+            android:layout_width="44dp"
+            android:layout_height="48dp"
+            android:gravity="center"
+            android:text="⛶"
+            android:textColor="@color/vls_eink_muted"
+            android:textSize="18sp" />
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/vls_eink_border" />
+
+    <LinearLayout
+        android:id="@+id/vls_surface_row"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal">
+
+        <LinearLayout
+            android:id="@+id/vls_tool_rail"
+            android:layout_width="72dp"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:background="@color/vls_eink_white">
+
+            <TextView android:id="@+id/vls_rail_view" style="@style/VellumSyncRailItem" android:text="View" />
+            <TextView android:id="@+id/vls_rail_pen" style="@style/VellumSyncRailItem" android:text="Pen" />
+            <TextView android:id="@+id/vls_rail_erase" style="@style/VellumSyncRailItem" android:text="Erase" />
+            <TextView android:id="@+id/vls_rail_style" style="@style/VellumSyncRailItem" android:text="Style" />
+            <TextView android:id="@+id/vls_rail_layer" style="@style/VellumSyncRailItem" android:text="Layer" />
+            <TextView android:id="@+id/vls_rail_page" style="@style/VellumSyncRailItem" android:text="Page" />
+            <TextView android:id="@+id/vls_rail_zoom" style="@style/VellumSyncRailItem" android:text="Zoom" />
+            <TextView android:id="@+id/vls_rail_sync" style="@style/VellumSyncRailItem" android:text="Sync" />
+
+            <Space
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
+            <TextView android:id="@+id/vls_rail_more" style="@style/VellumSyncRailItem" android:text="More" />
+        </LinearLayout>
+
+        <View
+            android:id="@+id/vls_rail_divider"
+            android:layout_width="1dp"
+            android:layout_height="match_parent"
+            android:background="@color/vls_eink_border" />
+
+        <FrameLayout
+            android:id="@+id/vls_canvas_shell"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1">
+
+            <FrameLayout
+                android:id="@+id/vls_note_canvas_host"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@color/vls_eink_white" />
+
+            <LinearLayout
+                android:id="@+id/vls_floating_panel"
+                android:layout_width="292dp"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top|start"
+                android:layout_margin="10dp"
+                android:orientation="vertical"
+                android:padding="12dp"
+                android:visibility="gone"
+                android:background="@drawable/vls_panel_bg"
+                android:elevation="2dp">
+
+                <TextView
+                    android:id="@+id/vls_panel_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Panel Title"
+                    android:textColor="@color/vls_eink_text"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:id="@+id/vls_panel_content"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:orientation="vertical" />
+            </LinearLayout>
+        </FrameLayout>
+    </LinearLayout>
+</LinearLayout>

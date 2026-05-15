@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="rail_width">72dp</dimen>
+    <dimen name="rail_button_height">64dp</dimen>
+    <dimen name="rail_icon_size">24dp</dimen>
+    <dimen name="button_touch_target">48dp</dimen>
+    <dimen name="top_bar_height">56dp</dimen>
+    <dimen name="floating_panel_width">280dp</dimen>
+    <dimen name="text_size_title">16sp</dimen>
+    <dimen name="text_size_label">12sp</dimen>
+    <dimen name="text_size_rail_label">10sp</dimen>
+</resources>

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="VellumSyncRailItem">
+        <item name="android:layout_width">64dp</item>
+        <item name="android:layout_height">48dp</item>
+        <item name="android:layout_marginTop">3dp</item>
+        <item name="android:layout_marginBottom">3dp</item>
+        <item name="android:gravity">center</item>
+        <item name="android:background">@drawable/vls_rail_item_clear</item>
+        <item name="android:textColor">@color/vls_eink_muted</item>
+        <item name="android:textSize">11sp</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+    </style>
+</resources>

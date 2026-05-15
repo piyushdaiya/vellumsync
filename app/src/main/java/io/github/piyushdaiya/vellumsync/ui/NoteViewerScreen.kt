@@ -1,29 +1,25 @@
 package io.github.piyushdaiya.vellumsync.ui
 
 import android.net.Uri
+import android.view.Gravity
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.LinearLayout
+import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
+import android.widget.TextView
+import android.widget.Space
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import io.github.piyushdaiya.vellumsync.R
+import io.github.piyushdaiya.vellumsync.device.DeviceCapabilityDetector
+import io.github.piyushdaiya.vellumsync.device.StylusProbePersistence
 import io.github.piyushdaiya.vellumsync.note.ImportedNoteCache
 import io.github.piyushdaiya.vellumsync.note.LocalAnnotationColor
 import io.github.piyushdaiya.vellumsync.note.LocalAnnotationOverlayStore
@@ -34,6 +30,24 @@ import io.github.piyushdaiya.vellumsync.note.OverlayRenderExporter
 import io.github.piyushdaiya.vellumsync.note.SupernoteInspectionReport
 import io.github.piyushdaiya.vellumsync.note.SupernoteNoteInspector
 import io.github.piyushdaiya.vellumsync.note.SupernoteStrokeGeometryPageReport
+
+private enum class NoteTool(
+    val railLabel: String,
+    val panelTitle: String,
+    val iconGlyph: String
+) {
+    VIEW("View", "View", "▣"),
+    PEN("Pen", "Pen", "✎"),
+    ERASER("Erase", "Erase", "⌫"),
+    STYLE("Style", "Style", "●"),
+    LAYERS("Layer", "Layers", "▤"),
+    PAGE("Page", "Page", "▥"),
+    ZOOM("Zoom", "Zoom", "+"),
+    EXPORT("Export", "Export", "⇧"),
+    SYNC("Sync", "Sync", "⟳"),
+    SETTINGS("Settings", "Settings", "⚙"),
+    MORE("More", "More", "⋯")
+}
 
 @Composable
 fun NoteViewerScreen(
@@ -54,26 +68,26 @@ fun NoteViewerScreen(
     }
     val report = reportResult.getOrNull()
     val error = reportResult.exceptionOrNull()?.message
+
     val currentPageIndex = remember(selection.sha256) { mutableStateOf(0) }
     val selectedTransformMode = remember(selection.sha256) {
         mutableStateOf(ViewerTransformPersistence.load(context, selection.sha256))
     }
-    val showDetails = remember { mutableStateOf(false) }
+    val railPosition = remember { mutableStateOf(RailPositionPersistence.load(context)) }
+    val activeTool = remember(selection.sha256) { mutableStateOf(NoteTool.VIEW) }
+    val activePanel = remember(selection.sha256) { mutableStateOf<NoteTool?>(null) }
     val fullScreenPreview = remember { mutableStateOf(false) }
     val exportError = remember { mutableStateOf<String?>(null) }
     val pendingExportJson = remember { mutableStateOf<String?>(null) }
     val pendingBinaryExport = remember { mutableStateOf<ByteArray?>(null) }
+    val showNoteDetailsPanel = remember { mutableStateOf(false) }
 
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json")
     ) { uri: Uri? ->
         if (uri != null) {
             runCatching {
-                writeTextToUri(
-                    context = context,
-                    uri = uri,
-                    text = pendingExportJson.value.orEmpty()
-                )
+                writeTextToUri(context, uri, pendingExportJson.value.orEmpty())
             }.onFailure { throwable ->
                 exportError.value = throwable.message ?: "Unable to export JSON."
             }
@@ -85,11 +99,7 @@ fun NoteViewerScreen(
     ) { uri: Uri? ->
         if (uri != null) {
             runCatching {
-                writeBytesToUri(
-                    context = context,
-                    uri = uri,
-                    bytes = pendingBinaryExport.value ?: ByteArray(0)
-                )
+                writeBytesToUri(context, uri, pendingBinaryExport.value ?: ByteArray(0))
             }.onFailure { throwable ->
                 exportError.value = throwable.message ?: "Unable to export overlay PNG."
             }
@@ -101,11 +111,7 @@ fun NoteViewerScreen(
     ) { uri: Uri? ->
         if (uri != null) {
             runCatching {
-                writeBytesToUri(
-                    context = context,
-                    uri = uri,
-                    bytes = pendingBinaryExport.value ?: ByteArray(0)
-                )
+                writeBytesToUri(context, uri, pendingBinaryExport.value ?: ByteArray(0))
             }.onFailure { throwable ->
                 exportError.value = throwable.message ?: "Unable to export overlay PDF."
             }
@@ -119,12 +125,14 @@ fun NoteViewerScreen(
     }
     val selectedPage = pages.getOrNull(safeIndex)
     val selectedPageNumber = selectedPage?.pageNumber ?: 1
+
     val overlayVisible = remember(selection.sha256) { mutableStateOf(true) }
     val overlayEditingEnabled = remember(selection.sha256) { mutableStateOf(false) }
     val overlayStyle = remember(selection.sha256) { mutableStateOf(LocalAnnotationStrokeStyle.DEFAULT) }
     val overlayStrokes = remember(selection.sha256, selectedPageNumber) {
         mutableStateOf(LocalAnnotationOverlayStore.loadPage(context, selection.sha256, selectedPageNumber))
     }
+
     val saveOverlayStrokes: (List<LocalAnnotationStroke>) -> Unit = { strokes ->
         overlayStrokes.value = strokes
         selectedPage?.let { page ->
@@ -138,622 +146,649 @@ fun NoteViewerScreen(
         }
     }
 
-    if (fullScreenPreview.value && report != null && selectedPage != null) {
-        FullScreenPreview(
-            fileName = selection.fileName,
-            page = selectedPage,
-            pageIndex = safeIndex,
-            totalPages = pages.size,
-            transformMode = selectedTransformMode.value,
-            onTransformSelect = { mode ->
-                selectedTransformMode.value = mode
-                ViewerTransformPersistence.save(context, selection.sha256, mode)
-            },
-            onExit = { fullScreenPreview.value = false },
-            onPrevious = {
-                currentPageIndex.value = (currentPageIndex.value - 1).coerceAtLeast(0)
-            },
-            onNext = {
-                currentPageIndex.value = (currentPageIndex.value + 1).coerceAtMost(pages.lastIndex)
-            },
-            overlayVisible = overlayVisible.value,
-            overlayEditingEnabled = overlayEditingEnabled.value,
-            overlayStyle = overlayStyle.value,
-            overlayStrokes = overlayStrokes.value,
-            onOverlayVisibleToggle = { overlayVisible.value = !overlayVisible.value },
-            onOverlayEditToggle = {
-                val nextEditing = !overlayEditingEnabled.value
-                overlayEditingEnabled.value = nextEditing
-                if (nextEditing) overlayVisible.value = true
-            },
-            onOverlayStyleSelect = { overlayStyle.value = it },
-            onUndoOverlay = {
-                if (overlayStrokes.value.isNotEmpty()) {
-                    saveOverlayStrokes(overlayStrokes.value.dropLast(1))
-                }
-            },
-            onClearOverlay = {
-                LocalAnnotationOverlayStore.clearPage(context, selection.sha256, selectedPage.pageNumber)
-                saveOverlayStrokes(emptyList())
-            },
-            onOverlayChanged = saveOverlayStrokes
-        )
-        return
+    fun setRailPosition(position: RailPosition) {
+        railPosition.value = position
+        RailPositionPersistence.save(context, position)
     }
 
-    Column(
-        modifier = Modifier
-            .padding(14.dp)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        CompactViewerHeader(
-            fileName = selection.fileName,
-            report = report,
-            onBack = onBack,
-            onExportDiagnostics = {
-                if (report != null) {
-                    pendingExportJson.value = LocalAnnotationOverlayStore.appendOverlayDiagnostics(
-                        baseReportJson = report.toJson(),
-                        context = context,
-                        noteSha256 = selection.sha256,
-                        totalPages = report.strokeGeometryReport.totalPages
-                    )
-                    exportLauncher.launch("vellumsync-note-diagnostics-${report.sha256.take(12)}.json")
-                }
-            }
+    fun undoOverlay() {
+        if (overlayStrokes.value.isNotEmpty()) {
+            saveOverlayStrokes(overlayStrokes.value.dropLast(1))
+        }
+    }
+
+    fun clearOverlayPage() {
+        val page = selectedPage ?: return
+        LocalAnnotationOverlayStore.clearPage(context, selection.sha256, page.pageNumber)
+        saveOverlayStrokes(emptyList())
+    }
+
+    fun exportDiagnostics() {
+        val inspection = report ?: return
+        pendingExportJson.value = LocalAnnotationOverlayStore.appendOverlayDiagnostics(
+            baseReportJson = inspection.toJson(),
+            context = context,
+            noteSha256 = selection.sha256,
+            totalPages = inspection.strokeGeometryReport.totalPages
         )
+        exportLauncher.launch("vellumsync-note-diagnostics-${inspection.sha256.take(12)}.json")
+    }
 
-        error?.let {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    modifier = Modifier.padding(16.dp),
-                    text = "Unable to open cached note: $it"
-                )
+    fun exportOverlayJson() {
+        val inspection = report ?: return
+        pendingExportJson.value = LocalAnnotationOverlayStore.overlayExportJson(
+            context = context,
+            noteSha256 = selection.sha256,
+            totalPages = inspection.strokeGeometryReport.totalPages
+        )
+        exportLauncher.launch("vellumsync-overlay-${selection.sha256.take(12)}.json")
+    }
+
+    fun exportOverlayPng() {
+        val page = selectedPage ?: return
+        pendingBinaryExport.value = OverlayRenderExporter.renderOverlayPreviewPng(
+            pageWidth = page.pageWidth,
+            pageHeight = page.pageHeight,
+            strokes = overlayStrokes.value
+        )
+        pngExportLauncher.launch("vellumsync-overlay-page-${page.pageNumber}.png")
+    }
+
+    fun exportOverlayPdf() {
+        val page = selectedPage ?: return
+        pendingBinaryExport.value = OverlayRenderExporter.renderOverlayPreviewPdf(
+            pageWidth = page.pageWidth,
+            pageHeight = page.pageHeight,
+            strokes = overlayStrokes.value
+        )
+        pdfExportLauncher.launch("vellumsync-overlay-page-${page.pageNumber}.pdf")
+    }
+
+    fun exportDeviceDiagnostics() {
+        val profile = DeviceCapabilityDetector.detect()
+        pendingExportJson.value = profile.toDiagnosticsJson(
+            stylusProbeConfirmed = StylusProbePersistence.isStylusConfirmed(context)
+        )
+        exportLauncher.launch("vellumsync-device-diagnostics.json")
+    }
+
+    fun selectTool(tool: NoteTool) {
+        when (tool) {
+            NoteTool.VIEW -> {
+                activeTool.value = tool
+                overlayEditingEnabled.value = false
+                activePanel.value = if (activePanel.value == tool) null else tool
             }
-        }
-
-        exportError.value?.let {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    modifier = Modifier.padding(16.dp),
-                    text = "Export error: $it"
-                )
+            NoteTool.PEN -> {
+                activeTool.value = tool
+                activePanel.value = null
+                overlayVisible.value = true
+                overlayEditingEnabled.value = true
             }
-        }
-
-        report?.let { inspection ->
-            if (pages.isEmpty() || selectedPage == null) {
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        modifier = Modifier.padding(16.dp),
-                        text = "No decoded preview pages are available for this note."
-                    )
-                }
-            } else {
-                TransformSelectorCompact(
-                    selected = selectedTransformMode.value,
-                    onSelect = { mode ->
-                        selectedTransformMode.value = mode
-                        ViewerTransformPersistence.save(context, selection.sha256, mode)
-                    }
-                )
-
-                OverlayControlsCard(
-                    overlayVisible = overlayVisible.value,
-                    editingEnabled = overlayEditingEnabled.value,
-                    style = overlayStyle.value,
-                    strokeCount = overlayStrokes.value.size,
-                    pointCount = overlayStrokes.value.sumOf { it.points.size },
-                    onToggleVisible = { overlayVisible.value = !overlayVisible.value },
-                    onToggleEditing = {
-                        val nextEditing = !overlayEditingEnabled.value
-                        overlayEditingEnabled.value = nextEditing
-                        if (nextEditing) overlayVisible.value = true
-                    },
-                    onStyleSelect = { overlayStyle.value = it },
-                    onReload = {
-                        overlayStrokes.value = LocalAnnotationOverlayStore.loadPage(
-                            context = context,
-                            noteSha256 = selection.sha256,
-                            pageNumber = selectedPage.pageNumber
-                        )
-                    },
-                    onExportJson = {
-                        pendingExportJson.value = LocalAnnotationOverlayStore.overlayExportJson(
-                            context = context,
-                            noteSha256 = selection.sha256,
-                            totalPages = inspection.strokeGeometryReport.totalPages
-                        )
-                        exportLauncher.launch("vellumsync-overlay-${selection.sha256.take(12)}.json")
-                    },
-                    onExportPng = {
-                        pendingBinaryExport.value = OverlayRenderExporter.renderOverlayPreviewPng(
-                            pageWidth = selectedPage.pageWidth,
-                            pageHeight = selectedPage.pageHeight,
-                            strokes = overlayStrokes.value
-                        )
-                        pngExportLauncher.launch("vellumsync-overlay-page-${selectedPage.pageNumber}.png")
-                    },
-                    onExportPdf = {
-                        pendingBinaryExport.value = OverlayRenderExporter.renderOverlayPreviewPdf(
-                            pageWidth = selectedPage.pageWidth,
-                            pageHeight = selectedPage.pageHeight,
-                            strokes = overlayStrokes.value
-                        )
-                        pdfExportLauncher.launch("vellumsync-overlay-page-${selectedPage.pageNumber}.pdf")
-                    },
-                    onUndo = {
-                        if (overlayStrokes.value.isNotEmpty()) {
-                            saveOverlayStrokes(overlayStrokes.value.dropLast(1))
-                        }
-                    },
-                    onClear = {
-                        LocalAnnotationOverlayStore.clearPage(context, selection.sha256, selectedPage.pageNumber)
-                        saveOverlayStrokes(emptyList())
-                    }
-                )
-
-                PagePreviewCard(
-                    page = selectedPage,
-                    pageIndex = safeIndex,
-                    totalPages = pages.size,
-                    transformMode = selectedTransformMode.value,
-                    onPrevious = {
-                        currentPageIndex.value = (currentPageIndex.value - 1).coerceAtLeast(0)
-                    },
-                    onNext = {
-                        currentPageIndex.value = (currentPageIndex.value + 1).coerceAtMost(pages.lastIndex)
-                    },
-                    onFullScreen = { fullScreenPreview.value = true },
-                    overlayVisible = overlayVisible.value,
-                    overlayEditingEnabled = overlayEditingEnabled.value,
-                    overlayStyle = overlayStyle.value,
-                    overlayStrokes = overlayStrokes.value,
-                    onOverlayChanged = saveOverlayStrokes
-                )
-
-                ViewerDetailsCard(
-                    report = inspection,
-                    pageIndex = safeIndex,
-                    expanded = showDetails.value,
-                    onToggle = { showDetails.value = !showDetails.value }
-                )
+            NoteTool.ERASER -> {
+                activeTool.value = tool
+                activePanel.value = NoteTool.ERASER
+                overlayEditingEnabled.value = false
+            }
+            NoteTool.STYLE,
+            NoteTool.LAYERS,
+            NoteTool.PAGE,
+            NoteTool.ZOOM,
+            NoteTool.EXPORT,
+            NoteTool.SYNC,
+            NoteTool.SETTINGS,
+            NoteTool.MORE -> {
+                activeTool.value = tool
+                activePanel.value = if (activePanel.value == tool) null else tool
             }
         }
     }
+
+    AndroidView(
+        factory = { androidContext ->
+            LayoutInflater.from(androidContext).inflate(
+                R.layout.activity_main,
+                null,
+                false
+            )
+        },
+        update = { root ->
+            bindXmlNoteSurface(
+                root = root,
+                selection = selection,
+                report = report,
+                error = error,
+                page = selectedPage,
+                pageIndex = safeIndex,
+                totalPages = pages.size,
+                transformMode = selectedTransformMode.value,
+                railPosition = railPosition.value,
+                activeTool = activeTool.value,
+                activePanel = activePanel.value,
+                fullScreen = fullScreenPreview.value,
+                overlayVisible = overlayVisible.value,
+                overlayEditingEnabled = overlayEditingEnabled.value,
+                overlayStyle = overlayStyle.value,
+                overlayStrokes = overlayStrokes.value,
+                showNoteDetails = showNoteDetailsPanel.value,
+                exportError = exportError.value,
+                onBack = {
+                    if (fullScreenPreview.value) {
+                        fullScreenPreview.value = false
+                    } else {
+                        onBack()
+                    }
+                },
+                onToolSelected = { tool -> selectTool(tool) },
+                onPrevious = { currentPageIndex.value = (currentPageIndex.value - 1).coerceAtLeast(0) },
+                onNext = { currentPageIndex.value = (currentPageIndex.value + 1).coerceAtMost(pages.lastIndex) },
+                onFullScreen = { fullScreenPreview.value = !fullScreenPreview.value },
+                onOverlayChanged = saveOverlayStrokes,
+                onStyleSelect = { overlayStyle.value = it },
+                onToggleOverlayVisible = { overlayVisible.value = !overlayVisible.value },
+                onToggleOverlayEditing = {
+                    val nextEditing = !overlayEditingEnabled.value
+                    overlayEditingEnabled.value = nextEditing
+                    if (nextEditing) {
+                        overlayVisible.value = true
+                        activeTool.value = NoteTool.PEN
+                        activePanel.value = null
+                    }
+                },
+                onUndo = { undoOverlay() },
+                onClear = { clearOverlayPage() },
+                onExportDiagnostics = { exportDiagnostics() },
+                onExportOverlayJson = { exportOverlayJson() },
+                onExportOverlayPng = { exportOverlayPng() },
+                onExportOverlayPdf = { exportOverlayPdf() },
+                onExportDeviceDiagnostics = { exportDeviceDiagnostics() },
+                onTransformSelect = { mode ->
+                    selectedTransformMode.value = mode
+                    ViewerTransformPersistence.save(context, selection.sha256, mode)
+                },
+                onRailPositionChange = { position -> setRailPosition(position) },
+                onToggleDetails = { showNoteDetailsPanel.value = !showNoteDetailsPanel.value }
+            )
+        }
+    )
 }
 
-@Composable
-private fun CompactViewerHeader(
-    fileName: String,
+private fun bindXmlNoteSurface(
+    root: View,
+    selection: ViewerNoteSelection,
     report: SupernoteInspectionReport?,
-    onBack: () -> Unit,
-    onExportDiagnostics: () -> Unit
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Text(text = "VellumSync Viewer")
-            Text(text = fileName)
-            if (report != null) {
-                Text(
-                    text = "Read-only • ${report.versionMarker ?: "unknown version"} • " +
-                        "${report.strokeGeometryReport.totalRenderedRecords}/${report.strokeGeometryReport.totalDecodedRecords} rendered"
-                )
-            } else {
-                Text(text = "Read-only viewer. The original Supernote .note file is not modified.")
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Button(onClick = onBack) {
-                    Text(text = "Back")
-                }
-                Button(onClick = onExportDiagnostics, enabled = report != null) {
-                    Text(text = "Export diagnostics")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun PagePreviewCard(
-    page: SupernoteStrokeGeometryPageReport,
+    error: String?,
+    page: SupernoteStrokeGeometryPageReport?,
     pageIndex: Int,
     totalPages: Int,
     transformMode: SupernotePreviewTransformMode,
+    railPosition: RailPosition,
+    activeTool: NoteTool,
+    activePanel: NoteTool?,
+    fullScreen: Boolean,
+    overlayVisible: Boolean,
+    overlayEditingEnabled: Boolean,
+    overlayStyle: LocalAnnotationStrokeStyle,
+    overlayStrokes: List<LocalAnnotationStroke>,
+    showNoteDetails: Boolean,
+    exportError: String?,
+    onBack: () -> Unit,
+    onToolSelected: (NoteTool) -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onFullScreen: () -> Unit,
+    onOverlayChanged: (List<LocalAnnotationStroke>) -> Unit,
+    onStyleSelect: (LocalAnnotationStrokeStyle) -> Unit,
+    onToggleOverlayVisible: () -> Unit,
+    onToggleOverlayEditing: () -> Unit,
+    onUndo: () -> Unit,
+    onClear: () -> Unit,
+    onExportDiagnostics: () -> Unit,
+    onExportOverlayJson: () -> Unit,
+    onExportOverlayPng: () -> Unit,
+    onExportOverlayPdf: () -> Unit,
+    onExportDeviceDiagnostics: () -> Unit,
+    onTransformSelect: (SupernotePreviewTransformMode) -> Unit,
+    onRailPositionChange: (RailPosition) -> Unit,
+    onToggleDetails: () -> Unit
+) {
+    val titleView = root.findViewById<TextView>(R.id.text_note_title)
+    val statusView = root.findViewById<TextView>(R.id.text_status)
+    val pageIndicator = root.findViewById<TextView>(R.id.text_page_indicator)
+    val back = root.findViewById<TextView>(R.id.button_back)
+    val undo = root.findViewById<TextView>(R.id.button_undo)
+    val redo = root.findViewById<TextView>(R.id.button_redo)
+    val full = root.findViewById<TextView>(R.id.button_fullscreen)
+    val canvasFull = root.findViewById<TextView>(R.id.button_canvas_fullscreen)
+    val prev = root.findViewById<TextView>(R.id.button_previous_page)
+    val next = root.findViewById<TextView>(R.id.button_next_page)
+    val canvasStatus = root.findViewById<TextView>(R.id.text_canvas_status)
+    val panel = root.findViewById<LinearLayout>(R.id.floating_panel_container)
+    val panelTitle = root.findViewById<TextView>(R.id.panel_title)
+    val panelContent = root.findViewById<LinearLayout>(R.id.panel_content_area)
+
+    titleView.text = selection.fileName
+    statusView.text = if (report == null) {
+        "Unable to open note: ${error ?: "No decoded preview pages"}"
+    } else {
+        "Read-only base · ${surfaceStatus(overlayVisible, overlayEditingEnabled)} · ${page?.renderedRecords ?: 0}/${page?.decodedRecords ?: 0} rendered"
+    }
+    pageIndicator.text = if (totalPages > 0 && page != null) "${page.pageNumber} / $totalPages" else "—"
+    back.text = if (fullScreen) "×" else "←"
+    back.setOnClickListener { onBack() }
+    undo.setTextColor(root.color(if (overlayStrokes.isNotEmpty()) R.color.eink_text_primary else R.color.eink_disabled))
+    undo.setOnClickListener { onUndo() }
+    redo.setTextColor(root.color(R.color.eink_disabled))
+    redo.setOnClickListener { }
+    full.text = if (fullScreen) "Exit" else "⛶"
+    full.setOnClickListener { onFullScreen() }
+    canvasFull.text = if (fullScreen) "Exit" else "⛶"
+    canvasFull.setOnClickListener { onFullScreen() }
+
+    prev.setEnabledState(root, pageIndex > 0)
+    next.setEnabledState(root, pageIndex < totalPages - 1)
+    prev.setOnClickListener { if (pageIndex > 0) onPrevious() }
+    next.setOnClickListener { if (pageIndex < totalPages - 1) onNext() }
+    canvasStatus.text = if (page != null) {
+        "Page ${page.pageNumber}/$totalPages · ${page.renderedRecords}/${page.decodedRecords} · ${transformMode.label} · ${toolStatus(activeTool, overlayVisible, overlayEditingEnabled)}"
+    } else {
+        "No preview available"
+    }
+
+    updateRailPosition(root, railPosition)
+    bindRail(root, activeTool, activePanel, onToolSelected)
+    bindPreview(
+        root = root,
+        page = page,
+        transformMode = transformMode,
+        overlayVisible = overlayVisible,
+        overlayEditingEnabled = overlayEditingEnabled,
+        overlayStyle = overlayStyle,
+        overlayStrokes = overlayStrokes,
+        onOverlayChanged = onOverlayChanged
+    )
+
+    if (activePanel == null && exportError == null) {
+        panel.visibility = View.GONE
+    } else {
+        panel.visibility = View.VISIBLE
+        positionPanel(panel, railPosition)
+        panelContent.removeAllViews()
+        exportError?.let { message ->
+            panelTitle.text = "Export error"
+            panelContent.addView(panelText(root, message))
+        }
+        when (activePanel) {
+            NoteTool.VIEW -> renderViewPanel(root, panelTitle, panelContent, transformMode, onTransformSelect)
+            NoteTool.STYLE -> renderStylePanel(root, panelTitle, panelContent, overlayStyle, onStyleSelect)
+            NoteTool.LAYERS -> renderLayerPanel(root, panelTitle, panelContent, overlayVisible, overlayEditingEnabled, overlayStrokes.size, onToggleOverlayVisible, onToggleOverlayEditing, onClear)
+            NoteTool.PAGE -> renderPagePanel(root, panelTitle, panelContent, page, pageIndex, totalPages, onPrevious, onNext, onFullScreen)
+            NoteTool.ZOOM -> renderZoomPanel(root, panelTitle, panelContent)
+            NoteTool.EXPORT -> renderExportPanel(root, panelTitle, panelContent, onExportDiagnostics, onExportOverlayJson, onExportOverlayPng, onExportOverlayPdf)
+            NoteTool.SYNC -> renderSyncPanel(root, panelTitle, panelContent)
+            NoteTool.SETTINGS -> renderSettingsPanel(root, panelTitle, panelContent, railPosition, onRailPositionChange, onExportDeviceDiagnostics)
+            NoteTool.MORE -> renderMorePanel(root, panelTitle, panelContent, report, page, showNoteDetails, onUndo, onClear, onToggleDetails)
+            NoteTool.ERASER -> renderEraserPanel(root, panelTitle, panelContent, onUndo, onClear)
+            else -> Unit
+        }
+    }
+}
+
+private fun bindPreview(
+    root: View,
+    page: SupernoteStrokeGeometryPageReport?,
+    transformMode: SupernotePreviewTransformMode,
     overlayVisible: Boolean,
     overlayEditingEnabled: Boolean,
     overlayStyle: LocalAnnotationStrokeStyle,
     overlayStrokes: List<LocalAnnotationStroke>,
     onOverlayChanged: (List<LocalAnnotationStroke>) -> Unit
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onPrevious, enabled = pageIndex > 0) {
-                    Text(text = "Previous")
-                }
-                Button(onClick = onNext, enabled = pageIndex < totalPages - 1) {
-                    Text(text = "Next")
-                }
-                Button(onClick = onFullScreen) {
-                    Text(text = "Full screen")
-                }
-            }
-            Text(
-                text = "Page ${page.pageNumber} of $totalPages • " +
-                    "${page.renderedRecords}/${page.decodedRecords} rendered • ${transformMode.label}"
-            )
-            AndroidView(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(980.dp),
-                factory = { androidContext ->
-                    SupernoteVectorPreviewView(
-                        context = androidContext,
-                        pageReport = page,
-                        transformMode = transformMode,
-                        overlayEditingEnabled = overlayEditingEnabled,
-                        overlayVisible = overlayVisible,
-                        overlayStrokes = overlayStrokes,
-                        currentOverlayStyle = overlayStyle,
-                        onOverlayChanged = onOverlayChanged
-                    )
-                },
-                update = { view ->
-                    view.updatePageReport(
-                        pageReport = page,
-                        transformMode = transformMode,
-                        overlayEditingEnabled = overlayEditingEnabled,
-                        overlayVisible = overlayVisible,
-                        overlayStrokes = overlayStrokes,
-                        currentOverlayStyle = overlayStyle,
-                        onOverlayChanged = onOverlayChanged
-                    )
-                }
-            )
-            Text(text = "Pan: drag inside preview. Zoom: pinch with two fingers.")
-        }
+    root.findViewById<VellumNoteSurfaceView>(R.id.overlay_layer).bindPage(
+        pageReport = page,
+        transformMode = transformMode,
+        overlayEditingEnabled = overlayEditingEnabled,
+        overlayVisible = overlayVisible,
+        overlayStrokes = overlayStrokes,
+        currentOverlayStyle = overlayStyle,
+        onOverlayChanged = onOverlayChanged
+    )
+}
+
+private fun bindRail(
+    root: View,
+    activeTool: NoteTool,
+    activePanel: NoteTool?,
+    onToolSelected: (NoteTool) -> Unit
+) {
+    val rail = root.findViewById<LinearLayout>(R.id.tool_rail)
+    val inflater = LayoutInflater.from(root.context)
+    rail.removeAllViews()
+
+    val primaryTools = listOf(
+        NoteTool.VIEW,
+        NoteTool.PEN,
+        NoteTool.ERASER,
+        NoteTool.STYLE,
+        NoteTool.LAYERS,
+        NoteTool.PAGE,
+        NoteTool.ZOOM,
+        NoteTool.EXPORT,
+        NoteTool.SYNC,
+        NoteTool.SETTINGS
+    )
+
+    primaryTools.forEach { tool ->
+        rail.addView(railItemView(inflater, rail, root, tool, activeTool == tool || activePanel == tool, onToolSelected))
+    }
+
+    rail.addView(Space(root.context), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+    rail.addView(railItemView(inflater, rail, root, NoteTool.MORE, activeTool == NoteTool.MORE || activePanel == NoteTool.MORE, onToolSelected))
+}
+
+private fun railItemView(
+    inflater: LayoutInflater,
+    parent: ViewGroup,
+    root: View,
+    tool: NoteTool,
+    active: Boolean,
+    onToolSelected: (NoteTool) -> Unit
+): View {
+    return inflater.inflate(R.layout.item_rail_button, parent, false).apply {
+        findViewById<TextView>(R.id.rail_icon).text = tool.iconGlyph
+        findViewById<TextView>(R.id.tool_label).text = tool.railLabel
+        setBackgroundResource(if (active) R.drawable.bg_active_tool else R.drawable.bg_tool_clear)
+        val color = root.color(if (active) R.color.eink_text_primary else R.color.eink_text_secondary)
+        findViewById<TextView>(R.id.rail_icon).setTextColor(color)
+        findViewById<TextView>(R.id.tool_label).setTextColor(color)
+        findViewById<TextView>(R.id.tool_label).setTypeface(null, if (active) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+        setOnClickListener { onToolSelected(tool) }
     }
 }
 
-@Composable
-private fun FullScreenPreview(
-    fileName: String,
-    page: SupernoteStrokeGeometryPageReport,
+private fun updateRailPosition(root: View, railPosition: RailPosition) {
+    val row = root.findViewById<LinearLayout>(R.id.surface_row)
+    val rail = root.findViewById<LinearLayout>(R.id.tool_rail)
+    val divider = root.findViewById<View>(R.id.rail_divider)
+    val shell = root.findViewById<FrameLayout>(R.id.note_canvas_container)
+    row.removeView(rail)
+    row.removeView(divider)
+    row.removeView(shell)
+    if (railPosition == RailPosition.LEFT) {
+        row.addView(rail)
+        row.addView(divider)
+        row.addView(shell)
+    } else {
+        row.addView(shell)
+        row.addView(divider)
+        row.addView(rail)
+    }
+}
+
+private fun positionPanel(panel: LinearLayout, railPosition: RailPosition) {
+    val params = panel.layoutParams as FrameLayout.LayoutParams
+    params.gravity = if (railPosition == RailPosition.LEFT) Gravity.TOP or Gravity.START else Gravity.TOP or Gravity.END
+    panel.layoutParams = params
+}
+
+private fun renderViewPanel(
+    root: View,
+    title: TextView,
+    content: LinearLayout,
+    transformMode: SupernotePreviewTransformMode,
+    onTransformSelect: (SupernotePreviewTransformMode) -> Unit
+) {
+    title.text = "View"
+    content.addView(panelText(root, "Transform calibration"))
+    content.addView(panelText(root, "Choose the A5X orientation used for the note surface."))
+    val a5xModes = preferredA5xViewModes()
+    a5xModes.forEach { mode ->
+        content.addView(textButton(root, mode.label, transformMode == mode) { onTransformSelect(mode) })
+    }
+}
+
+private fun preferredA5xViewModes(): List<SupernotePreviewTransformMode> {
+    val preferred = listOf("a5x-raw", "a5x-portrait-candidate", "a5x-portrait-candidate-2")
+    val byId = preferred.mapNotNull { wanted ->
+        SupernotePreviewTransformMode.viewerOrder.firstOrNull { it.id.equals(wanted, ignoreCase = true) }
+    }
+    if (byId.size == preferred.size) {
+        return byId
+    }
+    val byLabel = SupernotePreviewTransformMode.viewerOrder.filter { mode ->
+        val label = mode.label.lowercase()
+        label.contains("a5x raw") ||
+            label.contains("portrait 1") ||
+            label.contains("portrait candidate 1") ||
+            label.contains("portrait 2") ||
+            label.contains("portrait candidate 2")
+    }
+    return if (byLabel.isNotEmpty()) byLabel else SupernotePreviewTransformMode.viewerOrder
+}
+
+private fun renderStylePanel(
+    root: View,
+    title: TextView,
+    content: LinearLayout,
+    style: LocalAnnotationStrokeStyle,
+    onStyleSelect: (LocalAnnotationStrokeStyle) -> Unit
+) {
+    title.text = "Style"
+    content.addView(panelText(root, "Color"))
+    content.addView(rowOfButtons(root, listOf(
+        textButton(root, "Black", style.color == LocalAnnotationColor.BLACK) { onStyleSelect(style.copy(color = LocalAnnotationColor.BLACK)) },
+        textButton(root, "Gray", style.color == LocalAnnotationColor.GRAY) { onStyleSelect(style.copy(color = LocalAnnotationColor.GRAY)) }
+    )))
+    content.addView(panelText(root, "Width"))
+    content.addView(rowOfButtons(root, listOf(
+        textButton(root, "Thin", style.width == LocalAnnotationWidth.THIN) { onStyleSelect(style.copy(width = LocalAnnotationWidth.THIN)) },
+        textButton(root, "Medium", style.width == LocalAnnotationWidth.MEDIUM) { onStyleSelect(style.copy(width = LocalAnnotationWidth.MEDIUM)) },
+        textButton(root, "Thick", style.width == LocalAnnotationWidth.THICK) { onStyleSelect(style.copy(width = LocalAnnotationWidth.THICK)) }
+    )))
+}
+
+private fun renderLayerPanel(
+    root: View,
+    title: TextView,
+    content: LinearLayout,
+    overlayVisible: Boolean,
+    overlayEditingEnabled: Boolean,
+    strokeCount: Int,
+    onToggleOverlayVisible: () -> Unit,
+    onToggleOverlayEditing: () -> Unit,
+    onClear: () -> Unit
+) {
+    title.text = "Layers"
+    content.addView(panelText(root, "Supernote base: visible, read-only"))
+    content.addView(panelText(root, "VellumSync overlay: ${if (overlayVisible) "visible" else "hidden"}, ${if (overlayEditingEnabled) "editable" else "locked"}, $strokeCount stroke(s)"))
+    content.addView(textButton(root, if (overlayVisible) "Hide overlay" else "Show overlay", false, onToggleOverlayVisible))
+    content.addView(textButton(root, if (overlayEditingEnabled) "Lock overlay" else "Edit overlay", overlayEditingEnabled, onToggleOverlayEditing))
+    content.addView(textButton(root, "Clear page overlay", false, onClear))
+}
+
+private fun renderPagePanel(
+    root: View,
+    title: TextView,
+    content: LinearLayout,
+    page: SupernoteStrokeGeometryPageReport?,
     pageIndex: Int,
     totalPages: Int,
-    transformMode: SupernotePreviewTransformMode,
-    onTransformSelect: (SupernotePreviewTransformMode) -> Unit,
-    onExit: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
-    overlayVisible: Boolean,
-    overlayEditingEnabled: Boolean,
-    overlayStyle: LocalAnnotationStrokeStyle,
-    overlayStrokes: List<LocalAnnotationStroke>,
-    onOverlayVisibleToggle: () -> Unit,
-    onOverlayEditToggle: () -> Unit,
-    onOverlayStyleSelect: (LocalAnnotationStrokeStyle) -> Unit,
-    onUndoOverlay: () -> Unit,
-    onClearOverlay: () -> Unit,
-    onOverlayChanged: (List<LocalAnnotationStroke>) -> Unit
+    onFullScreen: () -> Unit
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Text(text = "$fileName • Page ${page.pageNumber} of $totalPages • ${transformMode.label}")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onExit) {
-                Text(text = "Exit")
-            }
-            Button(onClick = onPrevious, enabled = pageIndex > 0) {
-                Text(text = "Previous")
-            }
-            Button(onClick = onNext, enabled = pageIndex < totalPages - 1) {
-                Text(text = "Next")
-            }
-        }
-        Text(text = "Transform calibration: ${transformMode.label}")
-        TransformModeButtonRow(
-            selected = transformMode,
-            onSelect = onTransformSelect
-        )
-        OverlayControlsCompactRow(
-            overlayVisible = overlayVisible,
-            editingEnabled = overlayEditingEnabled,
-            style = overlayStyle,
-            strokeCount = overlayStrokes.size,
-            onToggleVisible = onOverlayVisibleToggle,
-            onToggleEditing = onOverlayEditToggle,
-            onStyleSelect = onOverlayStyleSelect,
-            onUndo = onUndoOverlay,
-            onClear = onClearOverlay
-        )
-        AndroidView(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-            factory = { androidContext ->
-                SupernoteVectorPreviewView(
-                    context = androidContext,
-                    pageReport = page,
-                    transformMode = transformMode,
-                    overlayEditingEnabled = overlayEditingEnabled,
-                    overlayVisible = overlayVisible,
-                    overlayStrokes = overlayStrokes,
-                    currentOverlayStyle = overlayStyle,
-                    onOverlayChanged = onOverlayChanged
-                )
-            },
-            update = { view ->
-                view.updatePageReport(
-                    pageReport = page,
-                    transformMode = transformMode,
-                    overlayEditingEnabled = overlayEditingEnabled,
-                    overlayVisible = overlayVisible,
-                    overlayStrokes = overlayStrokes,
-                    currentOverlayStyle = overlayStyle,
-                    onOverlayChanged = onOverlayChanged
-                )
-            }
-        )
-    }
+    title.text = "Page"
+    content.addView(panelText(root, if (page == null) "No page loaded" else "Page ${page.pageNumber} of $totalPages"))
+    content.addView(rowOfButtons(root, listOf(
+        textButton(root, "Previous", false, onPrevious).also { it.isEnabled = pageIndex > 0 },
+        textButton(root, "Next", false, onNext).also { it.isEnabled = pageIndex < totalPages - 1 },
+        textButton(root, "Full screen", false, onFullScreen)
+    )))
 }
 
-@Composable
-private fun TransformSelectorCompact(
-    selected: SupernotePreviewTransformMode,
-    onSelect: (SupernotePreviewTransformMode) -> Unit
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(text = "Transform calibration: ${selected.label}")
-            Text(text = "Use A5X presets to align this preview against the Supernote PDF/photo reference.")
-            TransformModeButtonRow(
-                selected = selected,
-                onSelect = onSelect
-            )
-        }
-    }
+private fun renderZoomPanel(root: View, title: TextView, content: LinearLayout) {
+    title.text = "Zoom"
+    content.addView(panelText(root, "Use pinch with two fingers. Pan in View mode."))
+    content.addView(panelText(root, "Fit page and reset pan controls will be added after XML UI migration is accepted."))
 }
 
-
-@Composable
-private fun TransformModeButtonRow(
-    selected: SupernotePreviewTransformMode,
-    onSelect: (SupernotePreviewTransformMode) -> Unit
+private fun renderExportPanel(
+    root: View,
+    title: TextView,
+    content: LinearLayout,
+    onExportDiagnostics: () -> Unit,
+    onExportOverlayJson: () -> Unit,
+    onExportOverlayPng: () -> Unit,
+    onExportOverlayPdf: () -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        SupernotePreviewTransformMode.viewerOrder.forEach { mode ->
-            Button(
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                onClick = { onSelect(mode) },
-                enabled = mode != selected
-            ) {
-                Text(text = mode.label)
-            }
-        }
-    }
+    title.text = "Export"
+    content.addView(panelText(root, "Export note, overlay, and diagnostics from the local sidecar workflow."))
+    content.addView(textButton(root, "Export note diagnostics JSON", false, onExportDiagnostics))
+    content.addView(textButton(root, "Export overlay JSON", false, onExportOverlayJson))
+    content.addView(textButton(root, "Export overlay PNG", false, onExportOverlayPng))
+    content.addView(textButton(root, "Export overlay PDF", false, onExportOverlayPdf))
 }
 
+private fun renderSyncPanel(
+    root: View,
+    title: TextView,
+    content: LinearLayout
+) {
+    title.text = "Sync"
+    content.addView(panelText(root, "Local sidecar active."))
+    content.addView(panelText(root, "Supernote .note write-back is disabled until writer validation is complete."))
+    content.addView(panelText(root, "Use Export for overlay JSON, PNG, PDF, and diagnostics."))
+}
 
-@Composable
-private fun OverlayControlsCard(
-    overlayVisible: Boolean,
-    editingEnabled: Boolean,
-    style: LocalAnnotationStrokeStyle,
-    strokeCount: Int,
-    pointCount: Int,
-    onToggleVisible: () -> Unit,
-    onToggleEditing: () -> Unit,
-    onStyleSelect: (LocalAnnotationStrokeStyle) -> Unit,
-    onReload: () -> Unit,
-    onExportJson: () -> Unit,
-    onExportPng: () -> Unit,
-    onExportPdf: () -> Unit,
+private fun renderSettingsPanel(
+    root: View,
+    title: TextView,
+    content: LinearLayout,
+    railPosition: RailPosition,
+    onRailPositionChange: (RailPosition) -> Unit,
+    onExportDeviceDiagnostics: () -> Unit
+) {
+    title.text = "Settings"
+    content.addView(panelText(root, "Rail position: ${railPosition.label}"))
+    content.addView(rowOfButtons(root, listOf(
+        textButton(root, "Left rail", railPosition == RailPosition.LEFT) { onRailPositionChange(RailPosition.LEFT) },
+        textButton(root, "Right rail", railPosition == RailPosition.RIGHT) { onRailPositionChange(RailPosition.RIGHT) }
+    )))
+    val profile = DeviceCapabilityDetector.detect()
+    val stylusConfirmed = StylusProbePersistence.isStylusConfirmed(root.context)
+    content.addView(panelText(root, "Device compatibility"))
+    content.addView(panelText(root, "Stylus support: ${profile.stylusSupportStatus.name}; probe confirmed: $stylusConfirmed"))
+    content.addView(panelText(root, "Device diagnostics: ${profile.manufacturer} ${profile.model} / Android ${profile.androidRelease} / SDK ${profile.sdkInt}"))
+    content.addView(textButton(root, "Export device diagnostics", false, onExportDeviceDiagnostics))
+}
+
+private fun renderMorePanel(
+    root: View,
+    title: TextView,
+    content: LinearLayout,
+    report: SupernoteInspectionReport?,
+    page: SupernoteStrokeGeometryPageReport?,
+    showNoteDetails: Boolean,
     onUndo: () -> Unit,
-    onClear: () -> Unit
+    onClear: () -> Unit,
+    onToggleDetails: () -> Unit
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(text = "Local annotation overlay")
-            Text(
-                text = when {
-                    editingEnabled -> "Editing is ON. Use the Boox pen/stylus to write. Finger touches are ignored for drawing."
-                    overlayVisible -> "Overlay is visible but editing is OFF. Use Show/Hide and Edit independently."
-                    else -> "Overlay is hidden and editing is OFF. Original Supernote .note remains read-only."
-                }
-            )
-            Text(text = "This page overlay: $strokeCount stroke(s), $pointCount point(s)")
-            Text(text = "Stroke style: ${style.color.label} / ${style.width.label}")
-            OverlayControlsCompactRow(
-                overlayVisible = overlayVisible,
-                editingEnabled = editingEnabled,
-                style = style,
-                strokeCount = strokeCount,
-                onToggleVisible = onToggleVisible,
-                onToggleEditing = onToggleEditing,
-                onStyleSelect = onStyleSelect,
-                onUndo = onUndo,
-                onClear = onClear
-            )
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    onClick = onReload
-                ) {
-                    Text(text = "Reload overlay")
-                }
-                Button(
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    onClick = onExportJson
-                ) {
-                    Text(text = "Export JSON")
-                }
-                Button(
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    onClick = onExportPng
-                ) {
-                    Text(text = "Export PNG")
-                }
-                Button(
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    onClick = onExportPdf
-                ) {
-                    Text(text = "Export PDF")
-                }
-            }
+    title.text = "More"
+    content.addView(panelText(root, "Quick actions"))
+    content.addView(rowOfButtons(root, listOf(
+        textButton(root, "Undo", false, onUndo),
+        textButton(root, "Clear page", false, onClear)
+    )))
+    content.addView(textButton(root, if (showNoteDetails) "Hide note details" else "Show note details", showNoteDetails, onToggleDetails))
+    if (showNoteDetails && report != null) {
+        content.addView(panelText(root, "Note: ${report.fileName}"))
+        content.addView(panelText(root, "Version: ${report.versionMarker ?: "not detected"}"))
+        content.addView(panelText(root, "Equipment: ${report.detectedEquipment ?: "not detected"}"))
+        content.addView(panelText(root, "Pages: ${report.strokeGeometryReport.totalPages}"))
+        page?.let { content.addView(panelText(root, "Current page rendered: ${it.renderedRecords}/${it.decodedRecords}")) }
+        content.addView(panelText(root, "Original .note remains read-only. Local annotations are sidecar overlays."))
+    }
+}
+
+private fun renderEraserPanel(root: View, title: TextView, content: LinearLayout, onUndo: () -> Unit, onClear: () -> Unit) {
+    title.text = "Erase"
+    content.addView(panelText(root, "Eraser v0 uses sidecar undo/clear. Stroke hit-testing comes later."))
+    content.addView(textButton(root, "Undo last stroke", false, onUndo))
+    content.addView(textButton(root, "Clear page overlay", false, onClear))
+}
+
+private fun panelText(root: View, value: String): TextView {
+    return TextView(root.context).apply {
+        text = value
+        setTextColor(root.color(R.color.eink_text_secondary))
+        textSize = 13f
+        setPadding(0, 6, 0, 6)
+    }
+}
+
+private fun textButton(root: View, label: String, active: Boolean, onClick: () -> Unit): TextView {
+    return TextView(root.context).apply {
+        text = label
+        gravity = Gravity.CENTER
+        textSize = 12f
+        setTextColor(root.color(R.color.eink_text_primary))
+        setTypeface(null, if (active) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+        setBackgroundResource(if (active) R.drawable.bg_text_button_active else R.drawable.bg_text_button)
+        setPadding(12, 8, 12, 8)
+        minHeight = 36
+        isClickable = true
+        isFocusable = true
+        setOnClickListener { onClick() }
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            setMargins(0, 4, 0, 4)
         }
     }
 }
 
-@Composable
-private fun OverlayControlsCompactRow(
-    overlayVisible: Boolean,
-    editingEnabled: Boolean,
-    style: LocalAnnotationStrokeStyle,
-    strokeCount: Int,
-    onToggleVisible: () -> Unit,
-    onToggleEditing: () -> Unit,
-    onStyleSelect: (LocalAnnotationStrokeStyle) -> Unit,
-    onUndo: () -> Unit,
-    onClear: () -> Unit
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Button(
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                onClick = onToggleVisible
-            ) {
-                Text(text = if (overlayVisible) "Hide overlay" else "Show overlay")
-            }
-            Button(
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                onClick = onToggleEditing
-            ) {
-                Text(text = if (editingEnabled) "Edit on" else "Edit off")
-            }
-            Button(
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                onClick = onUndo,
-                enabled = strokeCount > 0
-            ) {
-                Text(text = "Undo")
-            }
-            Button(
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                onClick = onClear,
-                enabled = strokeCount > 0
-            ) {
-                Text(text = "Clear page")
-            }
-        }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            LocalAnnotationColor.values().forEach { color ->
-                Button(
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    onClick = { onStyleSelect(style.copy(color = color)) },
-                    enabled = style.color != color
-                ) {
-                    Text(text = color.label)
-                }
-            }
-            LocalAnnotationWidth.values().forEach { width ->
-                Button(
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    onClick = { onStyleSelect(style.copy(width = width)) },
-                    enabled = style.width != width
-                ) {
-                    Text(text = width.label)
-                }
-            }
+private fun rowOfButtons(root: View, buttons: List<TextView>): LinearLayout {
+    return LinearLayout(root.context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        buttons.forEach { button ->
+            addView(button, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                setMargins(2, 4, 2, 4)
+            })
         }
     }
 }
 
-@Composable
-private fun ViewerDetailsCard(
-    report: SupernoteInspectionReport,
-    pageIndex: Int,
-    expanded: Boolean,
-    onToggle: () -> Unit
-) {
-    val page = report.strokeGeometryReport.pageReports[pageIndex]
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Button(onClick = onToggle) {
-                    Text(text = if (expanded) "Hide details" else "Show details")
-                }
-            }
-            if (!expanded) {
-                Text(text = "Diagnostics are hidden in normal viewer mode.")
-            } else {
-                Text(text = "Note details")
-                Text(text = "Version: ${report.versionMarker ?: "not detected"}")
-                Text(text = "Equipment: ${report.detectedEquipment ?: "not detected"}")
-                Text(text = "Pages: ${report.strokeGeometryReport.totalPages}")
-                Text(text = "SHA-256: ${report.sha256.take(16)}…")
-                Text(text = "Decoded records: ${report.strokeGeometryReport.totalDecodedRecords}")
-                Text(text = "Rendered records: ${report.strokeGeometryReport.totalRenderedRecords}")
-                Text(text = "Skipped records: ${report.strokeGeometryReport.totalSkippedRecords}")
-                Text(text = "Overlay sidecars: exported in diagnostics JSON when present")
+private fun horizontalScroll(root: View, child: View): HorizontalScrollView {
+    return HorizontalScrollView(root.context).apply {
+        addView(child)
+    }
+}
 
-                Text(text = "Page render details")
-                Text(text = "Page: ${page.pageNumber}")
-                Text(text = "Decoded: ${page.decodedRecords}")
-                Text(text = "Rendered: ${page.renderedRecords}")
-                Text(text = "Skipped: ${page.skippedRecords}")
-                Text(text = "Unknown subtype: ${page.unknownSubtypeRecords}")
-                Text(text = "Possible eraser/metadata: ${page.possibleEraserOrMetadataRecords}")
-                Text(text = "Alignment note: transform candidates are visual-only; choose the closest A5X preset and compare to the Supernote PDF export.")
-                if (page.warnings.isNotEmpty()) {
-                    Text(text = "Page warnings")
-                    page.warnings.forEach { warning -> Text(text = "• $warning") }
-                }
-            }
-        }
+private fun TextView.setEnabledState(root: View, enabledState: Boolean) {
+    isEnabled = enabledState
+    setTextColor(root.color(if (enabledState) R.color.eink_text_primary else R.color.eink_disabled))
+}
+
+private fun View.color(resourceId: Int): Int = context.getColor(resourceId)
+
+private fun surfaceStatus(overlayVisible: Boolean, overlayEditingEnabled: Boolean): String {
+    return when {
+        overlayEditingEnabled -> "Overlay editing"
+        overlayVisible -> "Overlay visible"
+        else -> "Overlay hidden"
+    }
+}
+
+private fun toolStatus(activeTool: NoteTool, overlayVisible: Boolean, overlayEditingEnabled: Boolean): String {
+    return when (activeTool) {
+        NoteTool.VIEW -> "View"
+        NoteTool.PEN -> if (overlayEditingEnabled) "Pen writes sidecar" else "Pen"
+        NoteTool.ERASER -> "Erase"
+        NoteTool.STYLE -> "Style"
+        NoteTool.LAYERS -> if (overlayVisible) "Overlay visible" else "Overlay hidden"
+        NoteTool.PAGE -> "Page"
+        NoteTool.ZOOM -> "Zoom"
+        NoteTool.EXPORT -> "Export"
+        NoteTool.SYNC -> "Sync disabled"
+        NoteTool.SETTINGS -> "Settings"
+        NoteTool.MORE -> "More"
     }
 }
