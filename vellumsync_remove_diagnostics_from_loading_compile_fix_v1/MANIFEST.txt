@@ -1,0 +1,8 @@
+vellumsync_remove_diagnostics_from_loading_compile_fix_v1
+
+Files:
+- app/src/main/java/io/github/piyushdaiya/vellumsync/ui/NoteInspectorScreen.kt
+- scripts/apply_vellumsync_remove_diagnostics_from_loading_compile_fix_v1.sh
+- scripts/validate_vellumsync_remove_diagnostics_from_loading_compile_fix_v1.sh
+- README-APPLY.md
+- MANIFEST.txt

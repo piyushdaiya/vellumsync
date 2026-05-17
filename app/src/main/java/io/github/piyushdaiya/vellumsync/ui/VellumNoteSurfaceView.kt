@@ -12,9 +12,12 @@ import io.github.piyushdaiya.vellumsync.note.SupernoteStrokeGeometryPageReport
 /**
  * XML-backed note surface host.
  *
- * This view replaces the previous plain overlay View in activity_main.xml and
- * keeps the existing Supernote vector preview + local sidecar annotation flow
- * isolated behind a normal Android View API.
+ * Compatibility note:
+ * recent VellumSync patch lines introduced extra bindPage named parameters such as
+ * `renderMode` and `renderedVisualPage`, while the currently active preview widget
+ * still only consumes pageReport/transform/overlay fields. Accept those newer
+ * parameters here as ignored compatibility shims so the app can compile across
+ * mixed patch lines.
  */
 class VellumNoteSurfaceView @JvmOverloads constructor(
     context: Context,
@@ -27,11 +30,20 @@ class VellumNoteSurfaceView @JvmOverloads constructor(
         pageReport: SupernoteStrokeGeometryPageReport?,
         transformMode: SupernotePreviewTransformMode,
         overlayEditingEnabled: Boolean,
+        overlayEraserEnabled: Boolean,
+        panZoomEnabled: Boolean,
         overlayVisible: Boolean,
         overlayStrokes: List<LocalAnnotationStroke>,
         currentOverlayStyle: LocalAnnotationStrokeStyle,
-        onOverlayChanged: (List<LocalAnnotationStroke>) -> Unit
+        onOverlayChanged: (List<LocalAnnotationStroke>) -> Unit,
+        renderMode: Any? = null,
+        renderedVisualPage: Any? = null,
+        visualPage: Any? = null
     ) {
+        // marker=vellumsync-totalpath-tool-semantics-classifier-lasso-eraser-suppression-v0-compile-repair-2
+        @Suppress("UNUSED_VARIABLE")
+        val ignoredCompatArgs = Triple(renderMode, renderedVisualPage, visualPage)
+
         if (pageReport == null) {
             preview = null
             removeAllViews()
@@ -45,6 +57,8 @@ class VellumNoteSurfaceView @JvmOverloads constructor(
             pageReport = pageReport,
             transformMode = transformMode,
             overlayEditingEnabled = overlayEditingEnabled,
+            overlayEraserEnabled = overlayEraserEnabled,
+            panZoomEnabled = panZoomEnabled,
             overlayVisible = overlayVisible,
             overlayStrokes = overlayStrokes,
             currentOverlayStyle = currentOverlayStyle,
@@ -59,6 +73,8 @@ class VellumNoteSurfaceView @JvmOverloads constructor(
             pageReport = pageReport,
             transformMode = transformMode,
             overlayEditingEnabled = overlayEditingEnabled,
+            overlayEraserEnabled = overlayEraserEnabled,
+            panZoomEnabled = panZoomEnabled,
             overlayVisible = overlayVisible,
             overlayStrokes = overlayStrokes,
             currentOverlayStyle = currentOverlayStyle,

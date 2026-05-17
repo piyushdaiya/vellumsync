@@ -1,0 +1,45 @@
+{
+  "fixtureName": "synctest1.visual.baseline.v0",
+  "pages": [
+    {
+      "pageNumber": 1,
+      "previewStatus": "Visual layer active",
+      "pageVisualWinnerPromoted": true,
+      "pageVisualWinnerSource": "byte-rle-run-value",
+      "pageVisualFinalDecoderFamily": "byte-rle-run-value",
+      "pageVisualPromotedFromDecoderFamily": "byte-rle-value-run",
+      "pageVisualStatusResolved": "visual-layer-active",
+      "pageVisualFallbackUsed": false
+    },
+    {
+      "pageNumber": 2,
+      "previewStatus": "Visual layer active",
+      "pageVisualWinnerPromoted": true,
+      "pageVisualWinnerSource": "byte-rle-run-value",
+      "pageVisualFinalDecoderFamily": "byte-rle-run-value",
+      "pageVisualPromotedFromDecoderFamily": "byte-rle-value-run",
+      "pageVisualStatusResolved": "visual-layer-active",
+      "pageVisualFallbackUsed": false
+    },
+    {
+      "pageNumber": 3,
+      "previewStatus": "Visual layer active",
+      "pageVisualWinnerPromoted": false,
+      "pageVisualWinnerSource": "byte-rle-value-run",
+      "pageVisualFinalDecoderFamily": "byte-rle-value-run",
+      "pageVisualPromotedFromDecoderFamily": null,
+      "pageVisualStatusResolved": "visual-layer-active",
+      "pageVisualFallbackUsed": false
+    },
+    {
+      "pageNumber": 4,
+      "previewStatus": "Visual layer active",
+      "pageVisualWinnerPromoted": false,
+      "pageVisualWinnerSource": "byte-rle-value-run",
+      "pageVisualFinalDecoderFamily": "byte-rle-value-run",
+      "pageVisualPromotedFromDecoderFamily": null,
+      "pageVisualStatusResolved": "visual-layer-active",
+      "pageVisualFallbackUsed": false
+    }
+  ]
+}

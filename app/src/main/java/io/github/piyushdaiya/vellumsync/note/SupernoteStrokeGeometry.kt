@@ -6,7 +6,19 @@ import kotlin.math.min
 
 private const val DEFAULT_PREVIEW_WIDTH = 1404f
 private const val DEFAULT_PREVIEW_HEIGHT = 1872f
-private const val MAX_GEOMETRY_POINTS_PER_RECORD = 512
+private const val MAX_GEOMETRY_POINTS_PER_RECORD = 1024
+
+// Empirical A5X page-space calibration for SN_FILE_VER_20230015 TOTALPATH
+// records. Supernote raw path points use a transposed coordinate frame for
+// A5X portrait notes: raw Y primarily maps to visual X, and raw X maps to
+// visual Y. These constants replace the old per-page raw-bounds fit that
+// stretched native Supernote handwriting into random-looking strokes.
+private const val A5X_RAW_Y_RIGHT = 12650f
+private const val A5X_RAW_TO_PAGE_X_SCALE = 0.061f
+private const val A5X_PAGE_X_LEFT = 82f
+private const val A5X_RAW_X_TOP = 2150f
+private const val A5X_RAW_TO_PAGE_Y_SCALE = 0.090f
+private const val A5X_PAGE_Y_TOP = 125f
 
 data class SupernoteGeometryPoint(
     val x: Float,
@@ -26,6 +38,7 @@ data class SupernoteGeometryBounds(
     }
 }
 
+// marker=vellumsync-erasure-mismatch-gate-compile-repair-v1
 data class SupernoteStrokeGeometryRecord(
     val recordIndex: Int,
     val category: String,
@@ -35,7 +48,14 @@ data class SupernoteStrokeGeometryRecord(
     val renderedPointCount: Int,
     val rawBounds: SupernoteGeometryBounds?,
     val normalizedBounds: SupernoteGeometryBounds?,
+    /** Page-space points used for normal rendering. For Supernote-native TOTALPATH strokes,
+     * this is the absolute A5X mapping, not a raw-bounds fit. */
     val points: List<SupernoteGeometryPoint>,
+    /** Debug-only raw-bounds fit points retained for calibration mode. */
+    val rawFitPoints: List<SupernoteGeometryPoint> = emptyList(),
+    val eraseActionScore: Float = 0f,
+    val visualMismatchScore: Float = 0f,
+    val suppressedAsErasure: Boolean = false,
     val warnings: List<String>
 ) {
     fun toJson(): String {
@@ -52,6 +72,10 @@ data class SupernoteStrokeGeometryRecord(
             append("\"points\":[")
             append(points.joinToString(separator = ",") { it.toJson() })
             append("],")
+            append("\"rawFitPointCount\":${rawFitPoints.size},")
+            append("\"eraseActionScore\":${eraseActionScore.formatForJson()},")
+            append("\"visualMismatchScore\":${visualMismatchScore.formatForJson()},")
+            append("\"suppressedAsErasure\":$suppressedAsErasure,")
             append("\"warnings\":${JsonText.stringArray(warnings)}")
             append("}")
         }
@@ -69,6 +93,12 @@ data class SupernoteStrokeGeometryPageReport(
     val skippedRecords: Int,
     val unknownSubtypeRecords: Int,
     val possibleEraserOrMetadataRecords: Int,
+    val filteredDiagonalSentinelRecords: Int = 0,
+    val filteredRecordIndexes: List<Int> = emptyList(),
+    val filteredRecordBounds: List<SupernoteGeometryBounds> = emptyList(),
+    val suppressedRecordCount: Int = 0,
+    val suppressedRecordIndexes: List<Int> = emptyList(),
+    val visualLayerActiveForNormalRender: Boolean = false,
     val records: List<SupernoteStrokeGeometryRecord>,
     val warnings: List<String>
 ) {
@@ -85,6 +115,23 @@ data class SupernoteStrokeGeometryPageReport(
             append("\"skippedRecords\":$skippedRecords,")
             append("\"unknownSubtypeRecords\":$unknownSubtypeRecords,")
             append("\"possibleEraserOrMetadataRecords\":$possibleEraserOrMetadataRecords,")
+            append("\"filteredDiagonalSentinelRecords\":$filteredDiagonalSentinelRecords,")
+            append("\"filteredRecordIndexes\":[")
+            append(filteredRecordIndexes.joinToString(separator = ","))
+            append("],")
+            append("\"filteredRecordBounds\":[")
+            append(filteredRecordBounds.joinToString(separator = ",") { it.toJson() })
+            append("],")
+            append("\"suppressedRecordCount\":$suppressedRecordCount,")
+            append("\"suppressedRecordIndexes\":[")
+            append(suppressedRecordIndexes.joinToString(separator = ","))
+            append("],")
+            append("\"visualLayerActiveForNormalRender\":$visualLayerActiveForNormalRender,")
+            append("\"activeRendererDiagnostics\":{")
+            append("\"totalDecodedRecords\":$decodedRecords,")
+            append("\"renderedNativeRecords\":$renderedRecords,")
+            append("\"filteredDiagonalOrSentinelRecords\":$filteredDiagonalSentinelRecords")
+            append("},")
             append("\"records\":[")
             append(records.joinToString(separator = ",") { it.toJson() })
             append("],")
@@ -104,8 +151,11 @@ data class SupernoteStrokeGeometryReport(
     val totalSkippedRecords: Int,
     val totalUnknownSubtypeRecords: Int,
     val totalPossibleEraserOrMetadataRecords: Int,
-    val defaultTransformMode: String = "a5x-raw",
+    val totalFilteredDiagonalSentinelRecords: Int = 0,
+    val defaultTransformMode: String = "a5x-absolute",
     val supportedTransformModes: List<String> = listOf(
+        "a5x-absolute",
+        "pdf-reference-alignment",
         "a5x-raw",
         "a5x-portrait-candidate",
         "a5x-portrait-candidate-2",
@@ -133,6 +183,7 @@ data class SupernoteStrokeGeometryReport(
             append("\"totalSkippedRecords\":$totalSkippedRecords,")
             append("\"totalUnknownSubtypeRecords\":$totalUnknownSubtypeRecords,")
             append("\"totalPossibleEraserOrMetadataRecords\":$totalPossibleEraserOrMetadataRecords,")
+            append("\"totalFilteredDiagonalSentinelRecords\":$totalFilteredDiagonalSentinelRecords,")
             append("\"defaultTransformMode\":${JsonText.quote(defaultTransformMode)},")
             append("\"supportedTransformModes\":${JsonText.stringArray(supportedTransformModes)},")
             append("\"pageReports\":[")
@@ -158,6 +209,7 @@ object SupernoteStrokeGeometryDecoder {
         val totalSkipped = pageReports.sumOf { it.skippedRecords }
         val totalUnknown = pageReports.sumOf { it.unknownSubtypeRecords }
         val totalPossibleEraser = pageReports.sumOf { it.possibleEraserOrMetadataRecords }
+        val totalFilteredDiagonalSentinel = pageReports.sumOf { it.filteredDiagonalSentinelRecords }
         val status = when {
             totalRendered == 0 -> "No stroke geometry could be rendered from decoded TOTALPATH records."
             totalSkipped == 0 -> "Stroke geometry decoded and vector preview-ready for all candidate records."
@@ -170,8 +222,11 @@ object SupernoteStrokeGeometryDecoder {
             if (totalPossibleEraser > 0) {
                 add("$totalPossibleEraser record(s) look like possible eraser, metadata, or non-stroke paths and need subtype work.")
             }
-            add("Render fidelity preview supports compact A5X calibration presets plus generic rotation/flip modes.")
-            add("Vector preview is still read-only and uses transform candidates for visual alignment against Supernote PDF exports.")
+            if (totalFilteredDiagonalSentinel > 0) {
+                add("$totalFilteredDiagonalSentinel record(s) were filtered from normal A5X rendering as diagonal/sentinel/non-stroke payloads; raw-fit debug can still show them.")
+            }
+            add("Default renderer uses A5X absolute TOTALPATH mapping for Supernote-native strokes; raw-fit is debug-only.")
+            add("PDF reference alignment mode is display-only and helps compare VellumSync render against Supernote PDF exports.")
         }
         return SupernoteStrokeGeometryReport(
             formatStatus = status,
@@ -183,8 +238,11 @@ object SupernoteStrokeGeometryDecoder {
             totalSkippedRecords = totalSkipped,
             totalUnknownSubtypeRecords = totalUnknown,
             totalPossibleEraserOrMetadataRecords = totalPossibleEraser,
-            defaultTransformMode = "a5x-raw",
+            totalFilteredDiagonalSentinelRecords = totalFilteredDiagonalSentinel,
+            defaultTransformMode = "a5x-absolute",
             supportedTransformModes = listOf(
+                "a5x-absolute",
+                "pdf-reference-alignment",
                 "a5x-raw",
                 "a5x-portrait-candidate",
                 "a5x-portrait-candidate-2",
@@ -222,6 +280,7 @@ object SupernoteStrokeGeometryDecoder {
         val skipped = normalizedRecords.size - rendered
         val unknown = normalizedRecords.count { it.subtype == "unknown" }
         val possibleEraser = normalizedRecords.count { it.subtype == "possible_eraser_or_metadata" }
+        val filteredDiagonalSentinel = normalizedRecords.filter { it.subtype == "unsupported_or_misdecoded_record" }
         val warnings = buildList {
             if (rawBounds == null && page.candidateRecords.isNotEmpty()) {
                 add("No raw point bounds could be computed for this page.")
@@ -232,18 +291,24 @@ object SupernoteStrokeGeometryDecoder {
             if (possibleEraser > 0) {
                 add("$possibleEraser record(s) may be eraser/metadata paths and need a later subtype decoder.")
             }
+            if (filteredDiagonalSentinel.isNotEmpty()) {
+                add("${filteredDiagonalSentinel.size} record(s) are filtered from the active A5X renderer as diagonal/sentinel/non-stroke payloads: ${filteredDiagonalSentinel.joinToString { it.recordIndex.toString() }}.")
+            }
         }
         return SupernoteStrokeGeometryPageReport(
             pageNumber = page.pageNumber,
             pageWidth = pageWidth,
             pageHeight = pageHeight,
             rawBounds = rawBounds,
-            transform = "raw-fit source geometry; viewer can apply A5X calibration, rotation, and flip transform modes",
+            transform = "a5x-absolute source geometry; raw-fit remains debug-only for calibration",
             decodedRecords = page.candidateRecords.size,
             renderedRecords = rendered,
             skippedRecords = skipped,
             unknownSubtypeRecords = unknown,
             possibleEraserOrMetadataRecords = possibleEraser,
+            filteredDiagonalSentinelRecords = filteredDiagonalSentinel.size,
+            filteredRecordIndexes = filteredDiagonalSentinel.map { it.recordIndex },
+            filteredRecordBounds = filteredDiagonalSentinel.mapNotNull { it.rawBounds },
             records = normalizedRecords,
             warnings = warnings
         )
@@ -260,16 +325,18 @@ object SupernoteStrokeGeometryDecoder {
     private fun rawRecord(record: SupernoteTotalPathRecordBoundary): RawRecord {
         val decoded = record.decodedPointArray
         if (decoded != null && decoded.decodedPointCount > 0) {
-            val points = buildList {
-                addAll(decoded.rawPointPreview)
-                decoded.rawPointTailPreview.forEach { point ->
-                    if (!contains(point)) add(point)
+            val points = decoded.rawPoints.ifEmpty {
+                buildList {
+                    addAll(decoded.rawPointPreview)
+                    decoded.rawPointTailPreview.forEach { point ->
+                        if (!contains(point)) add(point)
+                    }
                 }
             }
             return RawRecord(
                 recordIndex = record.recordIndex,
                 category = record.category,
-                source = "decodedPointArray-sampled-preview",
+                source = if (decoded.rawPoints.isNotEmpty()) "decodedPointArray-full" else "decodedPointArray-sampled-preview",
                 declaredPointCount = decoded.declaredPointCount,
                 points = points
             )
@@ -305,23 +372,38 @@ object SupernoteStrokeGeometryDecoder {
         pageHeight: Float
     ): SupernoteStrokeGeometryRecord {
         val sourcePoints = sample(rawRecord.points, MAX_GEOMETRY_POINTS_PER_RECORD)
-        val normalized = if (rawBounds == null) {
+        val mappedPagePoints = sourcePoints.map { point -> mapA5xRawPointToPage(point, pageWidth, pageHeight) }
+        val rawFitPoints = if (rawBounds == null) {
             emptyList()
         } else {
             sourcePoints.map { point -> normalize(point, rawBounds, pageWidth, pageHeight) }
         }
-        val subtype = classifySubtype(rawRecord, normalized)
-        val normalizedBounds = if (normalized.isEmpty()) null else computeNormalizedBounds(normalized)
+        val productionSubtype = classifySubtype(rawRecord, mappedPagePoints)
+        val heuristicFallbackRecord = rawRecord.source == "candidatePointRun-fallback-preview"
+        val suspicious = heuristicFallbackRecord ||
+            isSuspiciousProductionStroke(rawRecord, mappedPagePoints, pageWidth, pageHeight)
+        val absolutePagePoints = if (suspicious) emptyList() else mappedPagePoints
+        val subtype = if (suspicious) "unsupported_or_misdecoded_record" else productionSubtype
+        val normalizedBounds = if (absolutePagePoints.isEmpty()) null else computeNormalizedBounds(absolutePagePoints)
         val rawRecordBounds = computeRawBounds(rawRecord.points)
         val warnings = buildList {
             if (rawRecord.source == "candidatePointRun-fallback-preview") {
                 add("Rendered from fallback point-run preview because explicit decodedPointArray was unavailable.")
             }
-            if (normalized.size < 2) {
-                add("Fewer than two normalized points are available for vector preview.")
+            if (rawRecord.source == "decodedPointArray-sampled-preview") {
+                add("Rendered from compact preview/tail point samples; full point array was unavailable.")
+            }
+            if (absolutePagePoints.size < 2) {
+                add("Fewer than two mapped points are available for vector preview.")
             }
             if (rawRecord.category == "unknown") {
                 add("Record category is unknown; length-chain boundary is used without semantic path type.")
+            }
+            if (heuristicFallbackRecord) {
+                add("Record suppressed from normal rendering because it came from heuristic fallback point-run decoding. Raw-fit debug can still show it for diagnostics.")
+            }
+            if (suspicious && !heuristicFallbackRecord) {
+                add("Record suppressed from normal rendering because it looks like a misdecoded non-stroke, eraser, marker payload, or page-corner sentinel. Raw-fit debug remains available for calibration.")
             }
         }
         return SupernoteStrokeGeometryRecord(
@@ -330,12 +412,81 @@ object SupernoteStrokeGeometryDecoder {
             subtype = subtype,
             source = rawRecord.source,
             decodedPointCount = rawRecord.declaredPointCount,
-            renderedPointCount = normalized.size,
+            renderedPointCount = absolutePagePoints.size,
             rawBounds = rawRecordBounds,
             normalizedBounds = normalizedBounds,
-            points = normalized,
+            points = absolutePagePoints,
+            rawFitPoints = rawFitPoints,
             warnings = warnings
         )
+    }
+
+    private fun isSuspiciousProductionStroke(
+        rawRecord: RawRecord,
+        points: List<SupernoteGeometryPoint>,
+        pageWidth: Float,
+        pageHeight: Float
+    ): Boolean {
+        if (points.size < 2) return false
+
+        val bounds = computeNormalizedBounds(points) ?: return false
+        val spanX = (bounds.maxX - bounds.minX).toFloat()
+        val spanY = (bounds.maxY - bounds.minY).toFloat()
+        val diagonalSpan = spanX > pageWidth * 0.70f && spanY > pageHeight * 0.70f
+
+        val pathLength = pathLength(points)
+        val firstPoint = points.first()
+        val lastPoint = points.last()
+        val directDistance = kotlin.math.hypot(lastPoint.x - firstPoint.x, lastPoint.y - firstPoint.y)
+        val straightness = if (pathLength <= 0.0001f) 0f else directDistance / pathLength
+        val pageDiagonal = kotlin.math.hypot(pageWidth, pageHeight)
+
+        val diagonalDeltaX = kotlin.math.abs(lastPoint.x - firstPoint.x)
+        val diagonalDeltaY = kotlin.math.abs(lastPoint.y - firstPoint.y)
+        val diagonalOutlier =
+            directDistance > pageDiagonal * 0.38f &&
+                straightness > 0.82f &&
+                diagonalDeltaX > pageWidth * 0.28f &&
+                diagonalDeltaY > pageHeight * 0.22f
+
+        val first = firstPoint
+        val last = lastPoint
+        val nearLeft = { x: Float -> x <= pageWidth * 0.04f }
+        val nearRight = { x: Float -> x >= pageWidth * 0.96f }
+        val nearTop = { y: Float -> y <= pageHeight * 0.04f }
+        val nearBottom = { y: Float -> y >= pageHeight * 0.96f }
+        val cornerToCorner =
+            (nearLeft(first.x) && nearBottom(first.y) && nearRight(last.x) && nearTop(last.y)) ||
+                (nearRight(first.x) && nearTop(first.y) && nearLeft(last.x) && nearBottom(last.y)) ||
+                (nearLeft(last.x) && nearBottom(last.y) && nearRight(first.x) && nearTop(first.y)) ||
+                (nearRight(last.x) && nearTop(last.y) && nearLeft(first.x) && nearBottom(first.y))
+        if (cornerToCorner && straightness > 0.86f) return true
+        if (diagonalSpan && straightness > 0.94f && directDistance > pageDiagonal * 0.65f) return true
+        if (diagonalOutlier) return true
+
+        // Preserve normal Supernote straight-line strokes unless they already
+        // matched the large diagonal/sentinel checks above. The sync-test
+        // payload has one page-scale diagonal record that can be categorized as
+        // a straight line even though it is not visible in the Supernote PDF.
+        if (rawRecord.category == "straightLine") return false
+
+        // Do not broadly suppress fallback records here. Feature-rich Supernote
+        // notes store marker/ink/gray samples in records that can look unusual
+        // before exact subtype decoding. The active renderer still filters true
+        // corner-to-corner sentinels, but normal records are preserved so the
+        // page can render closer to Supernote PDF exports.
+        return false
+    }
+
+    private fun pathLength(points: List<SupernoteGeometryPoint>): Float {
+        if (points.size < 2) return 0f
+        var total = 0f
+        for (i in 0 until points.lastIndex) {
+            val a = points[i]
+            val b = points[i + 1]
+            total += kotlin.math.hypot(b.x - a.x, b.y - a.y)
+        }
+        return total
     }
 
     private fun classifySubtype(
@@ -372,6 +523,19 @@ object SupernoteStrokeGeometryDecoder {
             maxX = points.maxOf { it.x }.toLong(),
             minY = points.minOf { it.y }.toLong(),
             maxY = points.maxOf { it.y }.toLong()
+        )
+    }
+
+    private fun mapA5xRawPointToPage(
+        point: SupernoteRawPoint,
+        pageWidth: Float,
+        pageHeight: Float
+    ): SupernoteGeometryPoint {
+        val x = A5X_PAGE_X_LEFT + (A5X_RAW_Y_RIGHT - point.y.toFloat()) * A5X_RAW_TO_PAGE_X_SCALE
+        val y = A5X_PAGE_Y_TOP + (point.x.toFloat() - A5X_RAW_X_TOP) * A5X_RAW_TO_PAGE_Y_SCALE
+        return SupernoteGeometryPoint(
+            x = x.coerceIn(0f, pageWidth),
+            y = y.coerceIn(0f, pageHeight)
         )
     }
 

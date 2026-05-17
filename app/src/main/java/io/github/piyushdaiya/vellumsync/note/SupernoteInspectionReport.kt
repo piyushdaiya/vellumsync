@@ -46,9 +46,14 @@ data class SupernoteInspectionReport(
     val visualReport: SupernoteVisualReport,
     val totalPathProbeReport: SupernoteTotalPathProbeReport,
     val strokeGeometryReport: SupernoteStrokeGeometryReport,
+    val totalPathStructuralReport: SupernoteTotalPathStructuralReport,
     val compatibilityStatus: String,
     val warnings: List<String>,
-    val cachedCopyPath: String?
+    val cachedCopyPath: String?,
+    val openedSourceKind: String = "note",
+    val openedSourcePath: String? = null,
+    val cacheNotePresent: Boolean = true,
+    val cacheFailureReason: String? = null
 ) {
     fun toJson(): String {
         return buildString {
@@ -76,10 +81,15 @@ data class SupernoteInspectionReport(
             append("\"compatibilityStatus\":${JsonText.quote(compatibilityStatus)},")
             append("\"warnings\":${JsonText.stringArray(warnings)},")
             append("\"cachedCopyPath\":${JsonText.quote(cachedCopyPath)},")
+            append("\"openedSourceKind\":${JsonText.quote(openedSourceKind)},")
+            append("\"openedSourcePath\":${JsonText.quote(openedSourcePath)},")
+            append("\"cacheNotePresent\":$cacheNotePresent,")
+            append("\"cacheFailureReason\":${JsonText.quote(cacheFailureReason)},")
             append("\"containerReport\":${containerReport.toJson()},")
             append("\"visualReport\":${visualReport.toJson()},")
             append("\"totalPathProbeReport\":${totalPathProbeReport.toJson()},")
             append("\"strokeGeometryReport\":${strokeGeometryReport.toJson()},")
+            append("\"totalPathStructuralReport\":${totalPathStructuralReport.toJson()},")
             append("\"markerHits\":[")
             append(markerHits.joinToString(separator = ",") { it.toJson() })
             append("]")

@@ -1,20 +1,22 @@
 package io.github.piyushdaiya.vellumsync.ui
 
 /**
- * Display-only transform candidates used to align decoded Supernote raw geometry
- * against exported PDFs and photos. These transforms never write back to .note files.
+ * Display-only transform modes used to align decoded Supernote geometry
+ * against Supernote PDF exports. These transforms never write back to .note files.
  */
 enum class SupernotePreviewTransformMode(
     val id: String,
     val label: String,
     val family: String
 ) {
+    A5X_ABSOLUTE("a5x-absolute", "A5X absolute", "A5X calibration"),
+    PDF_REFERENCE_ALIGNMENT("pdf-reference-alignment", "PDF reference", "A5X calibration"),
     A5X_RAW("a5x-raw", "A5X raw", "A5X calibration"),
     A5X_PORTRAIT("a5x-portrait-candidate", "A5X portrait 1", "A5X calibration"),
     A5X_PORTRAIT_2("a5x-portrait-candidate-2", "A5X portrait 2", "A5X calibration"),
     A5X_FLIPPED_PORTRAIT("a5x-flipped-portrait", "A5X flipped portrait", "A5X calibration"),
     A5X_ROTATED_PORTRAIT("a5x-rotated-portrait", "A5X rotated portrait", "A5X calibration"),
-    RAW_FIT("raw-fit", "Raw fit", "Generic"),
+    RAW_FIT("raw-fit", "Raw fit debug", "Generic"),
     ROTATE_90("rotate-90", "Rotate 90", "Generic"),
     ROTATE_180("rotate-180", "Rotate 180", "Generic"),
     ROTATE_270("rotate-270", "Rotate 270", "Generic"),
@@ -33,11 +35,11 @@ enum class SupernotePreviewTransformMode(
         val ny = (y / py).coerceIn(0f, 1f)
 
         val mapped = when (this) {
-            A5X_RAW -> nx to ny
+            A5X_ABSOLUTE,
+            PDF_REFERENCE_ALIGNMENT,
+            A5X_RAW,
             RAW_FIT -> nx to ny
 
-            // Calibration candidates. Keep these explicit so the viewer can be
-            // aligned visually against Supernote PDF exports without touching the source .note.
             A5X_PORTRAIT -> (1f - ny) to (1f - nx)
             A5X_PORTRAIT_2 -> ny to nx
             A5X_FLIPPED_PORTRAIT -> (1f - ny) to nx
@@ -55,6 +57,8 @@ enum class SupernotePreviewTransformMode(
 
     companion object {
         val viewerOrder: List<SupernotePreviewTransformMode> = listOf(
+            A5X_ABSOLUTE,
+            PDF_REFERENCE_ALIGNMENT,
             A5X_RAW,
             A5X_PORTRAIT,
             A5X_PORTRAIT_2,
@@ -69,7 +73,7 @@ enum class SupernotePreviewTransformMode(
         )
 
         fun fromId(id: String?): SupernotePreviewTransformMode {
-            return values().firstOrNull { it.id == id } ?: A5X_RAW
+            return values().firstOrNull { it.id == id } ?: A5X_ABSOLUTE
         }
     }
 }

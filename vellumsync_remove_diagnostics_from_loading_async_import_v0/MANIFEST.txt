@@ -1,0 +1,11 @@
+vellumsync_remove_diagnostics_from_loading_async_import_v0
+
+Files:
+- app/src/main/java/io/github/piyushdaiya/vellumsync/note/ImportedNoteCache.kt
+- app/src/main/java/io/github/piyushdaiya/vellumsync/ui/RecentNotesScreen.kt
+- app/src/main/java/io/github/piyushdaiya/vellumsync/ui/LocalNoteLibrary.kt
+- app/src/main/java/io/github/piyushdaiya/vellumsync/ui/NoteViewerScreen.kt
+- scripts/apply_vellumsync_remove_diagnostics_from_loading_async_import_v0.sh
+- scripts/validate_vellumsync_remove_diagnostics_from_loading_async_import_v0.sh
+- README-APPLY.md
+- MANIFEST.txt

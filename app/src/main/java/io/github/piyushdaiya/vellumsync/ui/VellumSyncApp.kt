@@ -1,9 +1,11 @@
 package io.github.piyushdaiya.vellumsync.ui
 
+import android.util.Log
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -17,6 +19,7 @@ private enum class Screen {
 }
 
 @Composable
+// marker=vellumsync-note-open-async-logging-v0
 fun VellumSyncApp() {
     // The app opens to the note app / recent notes surface. Device compatibility
     // and diagnostics remain available from Settings/More instead of being the
@@ -24,6 +27,10 @@ fun VellumSyncApp() {
     val currentScreen = remember { mutableStateOf(Screen.RECENT_NOTES) }
     val selectedNote = remember { mutableStateOf<ViewerNoteSelection?>(null) }
     val deviceProfile = remember { DeviceCapabilityDetector.detect() }
+
+    LaunchedEffect(currentScreen.value, selectedNote.value?.notePath) {
+        Log.i("VellumSyncOpen", "screen=${currentScreen.value} selected=${selectedNote.value?.notePath ?: "none"}")
+    }
 
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize()) {

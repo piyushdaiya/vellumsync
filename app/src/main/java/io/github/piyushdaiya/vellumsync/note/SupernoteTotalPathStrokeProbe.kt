@@ -9,7 +9,12 @@ private const val TOTAL_PATH_PREVIEW_BYTES = 128
 private const val MAX_MARKER_CONTEXTS = 5
 private const val MAX_NUMERIC_RUNS_PER_PAGE = 10
 private const val RECORD_CATEGORY_MARKER_OFFSET_HINT = 60
-private const val MAX_RECORD_REPORTS_PER_PAGE = 64
+// Feature-rich Supernote pages can contain many small TOTALPATH records (for example
+// one record per pen/marker segment). 64 was enough for early smoke notes, but it
+// truncated sync-test.note and made only the left/top portion of the page render.
+// Keep a bounded window for performance, but allow enough records for realistic
+// one-page Supernote notes.
+private const val MAX_RECORD_REPORTS_PER_PAGE = 512
 private const val MAX_POINT_PREVIEW_PAIRS = 16
 private const val MAX_POINT_TAIL_PAIRS = 6
 private const val POINT_COUNT_OFFSET_FROM_CATEGORY_MARKER = 164
@@ -143,6 +148,11 @@ data class SupernoteTotalPathPointArrayDecode(
     val maxX: Long?,
     val minY: Long?,
     val maxY: Long?,
+    /**
+     * Complete decoded point array retained for internal render/write-back alignment.
+     * Diagnostics still serialize only preview/tail samples so JSON exports stay compact.
+     */
+    val rawPoints: List<SupernoteRawPoint> = emptyList(),
     val rawPointPreview: List<SupernoteRawPoint>,
     val rawPointTailPreview: List<SupernoteRawPoint>,
     val interpretation: String,
@@ -374,7 +384,7 @@ object SupernoteTotalPathStrokeProbe {
         page: SupernotePageSection
     ): SupernoteTotalPathPageReport {
         val totalPathOffset = page.layerOffsets.totalPathOffset
-        if (totalPathOffset == null) {
+        if (totalPathOffset == null || totalPathOffset <= 0) {
             return SupernoteTotalPathPageReport(
                 pageNumber = page.pageNumber,
                 totalPathOffset = null,
@@ -387,7 +397,7 @@ object SupernoteTotalPathStrokeProbe {
                 headerSizeMatchesPayload = null,
                 semanticRecordMarkerCount = 0,
                 recordCountMatchesSemanticMarkers = null,
-                recordBoundaryModelStatus = "No TOTALPATH offset parsed for this page.",
+                recordBoundaryModelStatus = if (totalPathOffset == null) "No TOTALPATH offset parsed for this page." else "TOTALPATH offset is zero/invalid; treating page as blank.",
                 recordChainDecoderStatus = "No chain decoded because TOTALPATH is absent.",
                 pointArrayDecodeStatus = "No point arrays decoded because TOTALPATH is absent.",
                 recordsDecodedByLengthChain = 0,
@@ -401,7 +411,7 @@ object SupernoteTotalPathStrokeProbe {
                 candidateStrokeRecordCount = null,
                 candidateStrokeRecordSignals = emptyList(),
                 candidateToolSignals = emptyList(),
-                warnings = listOf("No TOTALPATH offset was parsed for this page.")
+                warnings = listOf(if (totalPathOffset == null) "No TOTALPATH offset was parsed for this page." else "TOTALPATH offset is zero/invalid; treating page as blank.")
             )
         }
 
@@ -475,7 +485,7 @@ object SupernoteTotalPathStrokeProbe {
                 add("${numericRuns.size} coordinate/pressure-like numeric run(s) found.")
             }
             if (candidateRecords.isNotEmpty()) {
-                add("${candidateRecords.size} candidate record report(s) generated.")
+                add("${candidateRecords.size} candidate record report(s) generated; record decode window=$MAX_RECORD_REPORTS_PER_PAGE.")
                 add(recordChainDecoderStatus)
                 add(pointArrayDecodeStatus)
             }
@@ -495,6 +505,9 @@ object SupernoteTotalPathStrokeProbe {
             }
             if (declaredRecordCount != null && recordCountMatchesSemanticMarkers == false) {
                 add("Declared record count does not match semantic marker count; length-chain decoder is used and semantic markers are annotations only.")
+            }
+            if (candidateRecords.size >= MAX_RECORD_REPORTS_PER_PAGE && declaredRecordCount != null && declaredRecordCount > MAX_RECORD_REPORTS_PER_PAGE) {
+                add("TOTALPATH record decode reached MAX_RECORD_REPORTS_PER_PAGE=$MAX_RECORD_REPORTS_PER_PAGE; additional records may exist after the diagnostics/render window.")
             }
             if (numericRuns.isEmpty()) {
                 add("No coordinate-like numeric runs were detected by the conservative heuristic.")
@@ -902,6 +915,7 @@ object SupernoteTotalPathStrokeProbe {
             maxX = maxX,
             minY = minY,
             maxY = maxY,
+            rawPoints = points.toList(),
             rawPointPreview = points.take(MAX_POINT_PREVIEW_PAIRS),
             rawPointTailPreview = points.takeLast(min(MAX_POINT_TAIL_PAIRS, points.size)),
             interpretation = "Raw Supernote coordinate points decoded. Coordinate transform to screen/page space is deferred.",

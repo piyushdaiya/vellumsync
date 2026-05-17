@@ -1,0 +1,8 @@
+vellumsync_import_note_picker_mime_fallback_v0
+
+Files:
+- app/src/main/java/io/github/piyushdaiya/vellumsync/ui/RecentNotesScreen.kt
+- scripts/apply_vellumsync_import_note_picker_mime_fallback_v0.sh
+- scripts/validate_vellumsync_import_note_picker_mime_fallback_v0.sh
+- README-APPLY.md
+- MANIFEST.txt

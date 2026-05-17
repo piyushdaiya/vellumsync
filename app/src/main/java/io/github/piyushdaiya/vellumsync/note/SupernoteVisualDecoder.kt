@@ -5,10 +5,13 @@ import io.github.piyushdaiya.vellumsync.util.JsonText
 /**
  * Read-only visual-layer probe for Supernote NOTE files.
  *
- * This does not decode RATTA_RLE bitmap payloads yet. It resolves the layer
- * metadata records referenced by the structured container parser and treats
- * LAYERBITMAP as a payload pointer/offset, not as a byte count.
+ * This keeps the repository-compatible probe implementation and only adds
+ * page-level export fields sourced from the same render object used by the UI.
  */
+// marker=vellumsync-ratta-rle-render-object-page-export-v0
+// marker=vellumsync-ratta-rle-decoder-family-provenance-alias-v0
+// marker=vellumsync-ratta-rle-decoder-family-provenance-export-v1-compile-repair
+// marker=vellumsync-ratta-rle-page-report-constructor-provenance-wiring-v0
 data class SupernoteVisualLayerRecord(
     val pageNumber: Int,
     val logicalLayerName: String,
@@ -70,6 +73,13 @@ data class SupernoteVisualPageReport(
     val layerRecords: List<SupernoteVisualLayerRecord>,
     val expectedPdfReference: String?,
     val previewStatus: String,
+    val pageVisualWinnerPromoted: Boolean = false,
+    val pageVisualWinnerSource: String? = null,
+    val pageVisualFinalDecoderFamily: String? = null,
+    val pageVisualPromotedFromDecoderFamily: String? = null,
+    val pageVisualStatusResolved: String? = null,
+    val pageVisualStatusReason: String? = null,
+    val pageVisualFallbackUsed: Boolean = false,
     val warnings: List<String>
 ) {
     fun toJson(): String {
@@ -83,6 +93,13 @@ data class SupernoteVisualPageReport(
             append("],")
             append("\"expectedPdfReference\":${JsonText.quote(expectedPdfReference)},")
             append("\"previewStatus\":${JsonText.quote(previewStatus)},")
+            append("\"pageVisualWinnerPromoted\":$pageVisualWinnerPromoted,")
+            append("\"pageVisualWinnerSource\":${JsonText.quote(pageVisualWinnerSource)},")
+        append("\"pageVisualFinalDecoderFamily\":${JsonText.quote(pageVisualFinalDecoderFamily)},")
+        append("\"pageVisualPromotedFromDecoderFamily\":${JsonText.quote(pageVisualPromotedFromDecoderFamily)},")
+            append("\"pageVisualStatusResolved\":${JsonText.quote(pageVisualStatusResolved)},")
+            append("\"pageVisualStatusReason\":${JsonText.quote(pageVisualStatusReason)},")
+            append("\"pageVisualFallbackUsed\":$pageVisualFallbackUsed,")
             append("\"warnings\":${JsonText.stringArray(warnings)}")
             append("}")
         }
@@ -172,6 +189,7 @@ object SupernoteVisualDecoder {
 
         val pageReports = containerReport.pageSections.map { page ->
             buildPageReport(
+                bytes = bytes,
                 page = page,
                 layerRecords = enrichedByPage[page.pageNumber].orEmpty(),
                 pdfReferenceName = pdfReferenceName
@@ -213,8 +231,8 @@ object SupernoteVisualDecoder {
 
         val status = when {
             allLayers.isEmpty() -> "No visual layer records parsed."
-            rleCount == allLayers.size -> "RATTA_RLE visual layer records isolated; LAYERBITMAP is treated as a payload offset. Bitmap decode is deferred."
-            else -> "Visual layer records isolated with mixed/unknown protocols; LAYERBITMAP is treated as a payload offset. Bitmap decode is deferred."
+            rleCount == allLayers.size -> "RATTA_RLE visual layer records isolated; probe and render winner logic are unified per page."
+            else -> "Visual layer records isolated with mixed/unknown protocols; probe and render winner logic are unified per page."
         }
 
         return SupernoteVisualReport(
@@ -229,6 +247,7 @@ object SupernoteVisualDecoder {
     }
 
     private fun buildPageReport(
+        bytes: ByteArray,
         page: SupernotePageSection,
         layerRecords: List<SupernoteVisualLayerRecord>,
         pdfReferenceName: String?
@@ -247,20 +266,43 @@ object SupernoteVisualDecoder {
                 }
             }
         }
-        val previewStatus = when {
+        val legacyPreviewStatus = when {
             layerRecords.isEmpty() -> "No preview available."
             layerRecords.any { it.layerProtocol == "RATTA_RLE" } -> "Payload-boundary probe only: RATTA_RLE bitmap decode is not implemented."
             else -> "Payload-boundary probe only: no decodable bitmap protocol is enabled."
         }
 
-        return SupernoteVisualPageReport(
+        val probePage = SupernoteVisualPageReport(
             pageNumber = page.pageNumber,
             pageStyle = page.pageStyle,
             layerSeq = page.layerSeq,
             layerRecords = layerRecords.sortedBy { it.layerRecordOffset },
             expectedPdfReference = pdfReferenceName,
-            previewStatus = previewStatus,
+            previewStatus = legacyPreviewStatus,
             warnings = warnings
+        )
+        val rendered = SupernoteRattaRleVisualLayerRenderer.renderPageFromVisualPage(bytes, probePage)
+        val resolvedPreviewStatus = when (rendered.pageVisualStatusResolved) {
+            "visual-layer-active" -> "Visual layer active"
+            "visual-layer-unavailable" -> "Visual layer unavailable"
+            else -> legacyPreviewStatus
+        }
+
+        return SupernoteVisualPageReport(
+            pageNumber = probePage.pageNumber,
+            pageStyle = probePage.pageStyle,
+            layerSeq = probePage.layerSeq,
+            layerRecords = probePage.layerRecords,
+            expectedPdfReference = probePage.expectedPdfReference,
+            previewStatus = resolvedPreviewStatus,
+            pageVisualWinnerPromoted = rendered.pageVisualWinnerPromoted,
+            pageVisualWinnerSource = rendered.pageVisualWinnerSource,
+            pageVisualFinalDecoderFamily = rendered.pageVisualFinalDecoderFamily,
+            pageVisualPromotedFromDecoderFamily = rendered.pageVisualPromotedFromDecoderFamily,
+            pageVisualStatusResolved = rendered.pageVisualStatusResolved,
+            pageVisualStatusReason = rendered.pageVisualStatusReason,
+            pageVisualFallbackUsed = rendered.pageVisualFallbackUsed,
+            warnings = probePage.warnings + rendered.warnings
         )
     }
 
@@ -328,12 +370,8 @@ object SupernoteVisualDecoder {
         }
 
         val warnings = buildList {
-            if (layerType == null) {
-                add("LAYERTYPE was not parsed from the layer record window.")
-            }
-            if (layerProtocol == null) {
-                add("LAYERPROTOCOL was not parsed from the layer record window.")
-            }
+            if (layerType == null) add("LAYERTYPE was not parsed from the layer record window.")
+            if (layerProtocol == null) add("LAYERPROTOCOL was not parsed from the layer record window.")
             if (parsedLayerName != null && parsedLayerName != logicalLayerName) {
                 add("Parsed LAYERNAME=$parsedLayerName differs from section reference $logicalLayerName.")
             }
@@ -342,9 +380,7 @@ object SupernoteVisualDecoder {
             } else if (bitmapOffset !in 0 until bytes.size) {
                 add("LAYERBITMAP offset $bitmapOffset is outside file bounds 0..${bytes.size - 1}.")
             }
-            if (metadataEndOffset == null) {
-                add("Layer metadata end was not found; using probe window only.")
-            }
+            if (metadataEndOffset == null) add("Layer metadata end was not found; using probe window only.")
         }
 
         return LayerRecordDraft(
@@ -381,9 +417,7 @@ object SupernoteVisualDecoder {
         }
         val estimatedLength = if (payloadOffset != null && payloadEnd != null && payloadEnd > payloadOffset) {
             payloadEnd - payloadOffset
-        } else {
-            null
-        }
+        } else null
         val startsBeforeLayerRecord = payloadOffset?.let { it < layerRecordOffset }
         val warningsWithBoundary = buildList {
             addAll(warnings)
@@ -479,7 +513,6 @@ object SupernoteVisualDecoder {
         if (layerRecogn != null) {
             return layerRecordOffset + layerRecogn.range.last + 1
         }
-
         val layerBitmap = Regex("<LAYERBITMAP:[^>]*>").find(probeAscii)
         return layerBitmap?.let { layerRecordOffset + it.range.last + 1 }
     }

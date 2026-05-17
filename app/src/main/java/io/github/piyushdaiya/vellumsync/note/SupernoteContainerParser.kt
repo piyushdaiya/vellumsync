@@ -129,6 +129,12 @@ object SupernoteContainerParser {
     private val versionRegex = Regex("SN_FILE_VER_[0-9]+")
     private val pageReferenceRegex = Regex("<PAGE([0-9]+):([0-9]+)>")
 
+    private data class PageReferenceCandidate(
+        val pageNumber: Int,
+        val pageSectionOffset: Int,
+        val markerOffset: Int
+    )
+
     fun parse(bytes: ByteArray): SupernoteContainerReport {
         val ascii = bytes.toAsciiLikeString()
         val header = SupernoteHeaderFields(
@@ -141,17 +147,42 @@ object SupernoteContainerParser {
             fileId = tagValue(ascii, "FILE_ID")
         )
 
-        val pageReferences = pageReferenceRegex.findAll(ascii)
+        val pageReferenceCandidates = pageReferenceRegex.findAll(ascii)
             .mapNotNull { match ->
                 val pageNumber = match.groupValues[1].toIntOrNull()
                 val offset = match.groupValues[2].toIntOrNull()
                 if (pageNumber == null || offset == null) {
                     null
                 } else {
-                    SupernotePageReference(pageNumber, offset)
+                    PageReferenceCandidate(
+                        pageNumber = pageNumber,
+                        pageSectionOffset = offset,
+                        markerOffset = match.range.first
+                    )
                 }
             }
-            .distinctBy { it.pageNumber }
+            .toList()
+
+        /*
+         * Supernote may retain older page-table snapshots after edits/refreshes.
+         * The first <PAGEn:...> reference can point at an older blank/thumbnail
+         * section while the latest reference near the tail points at the current
+         * page section. Rendering the first reference makes edited notes appear
+         * blank even though the current page content exists later in the file.
+         *
+         * Use the latest marker occurrence per page as the active page table.
+         */
+        val pageReferences = pageReferenceCandidates
+            .groupBy { it.pageNumber }
+            .values
+            .mapNotNull { candidates ->
+                candidates.maxByOrNull { it.markerOffset }?.let { latest ->
+                    SupernotePageReference(
+                        pageNumber = latest.pageNumber,
+                        pageSectionOffset = latest.pageSectionOffset
+                    )
+                }
+            }
             .sortedBy { it.pageNumber }
             .toList()
 
@@ -184,6 +215,10 @@ object SupernoteContainerParser {
             }
             if (pageReferences.isEmpty()) {
                 add("No <PAGEn:offset> page table entries were found.")
+            }
+            val duplicatePageReferenceCount = pageReferenceCandidates.size - pageReferences.size
+            if (duplicatePageReferenceCount > 0) {
+                add("Multiple historical <PAGEn:offset> references were found; using the latest reference per page for rendering.")
             }
             val finalPage = header.finalOperationPage
             if (finalPage != null && pageReferences.isNotEmpty() && finalPage != pageReferences.size) {

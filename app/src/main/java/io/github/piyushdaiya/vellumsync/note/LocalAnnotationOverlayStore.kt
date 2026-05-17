@@ -25,12 +25,41 @@ enum class LocalAnnotationColor(
     val id: String,
     val label: String
 ) {
-    BLACK("black", "Black"),
-    GRAY("gray", "Gray");
+    WHITE("white", "White"),
+    LIGHT_GRAY("light_gray", "Light Grey"),
+    DARK_GRAY("dark_gray", "Dark Grey"),
+    BLACK("black", "Black");
 
     companion object {
         fun fromId(id: String?): LocalAnnotationColor {
-            return values().firstOrNull { it.id == id } ?: BLACK
+            return when (id) {
+                "gray" -> DARK_GRAY // Backward compatibility with older sidecars.
+                "lightGrey", "light-gray", "light_gray" -> LIGHT_GRAY
+                "darkGrey", "dark-gray", "dark_gray" -> DARK_GRAY
+                "white" -> WHITE
+                "black" -> BLACK
+                else -> values().firstOrNull { it.id == id } ?: BLACK
+            }
+        }
+    }
+}
+
+enum class LocalAnnotationToolKind(
+    val id: String,
+    val label: String
+) {
+    NEEDLE_POINT("needle_point", "Needle Point Pen"),
+    INK_PEN("ink_pen", "Ink Pen"),
+    MARKER("marker", "Marker");
+
+    companion object {
+        fun fromId(id: String?): LocalAnnotationToolKind {
+            return when (id) {
+                "needle", "needle-point", "needle_point" -> NEEDLE_POINT
+                "marker", "highlighter" -> MARKER
+                "ink", "ink-pen", "ink_pen", "stylus" -> INK_PEN
+                else -> values().firstOrNull { it.id == id } ?: INK_PEN
+            }
         }
     }
 }
@@ -57,7 +86,8 @@ enum class LocalAnnotationWidth(
 
 data class LocalAnnotationStrokeStyle(
     val color: LocalAnnotationColor = LocalAnnotationColor.BLACK,
-    val width: LocalAnnotationWidth = LocalAnnotationWidth.MEDIUM
+    val width: LocalAnnotationWidth = LocalAnnotationWidth.MEDIUM,
+    val toolKind: LocalAnnotationToolKind = LocalAnnotationToolKind.INK_PEN
 ) {
     val widthPx: Float get() = width.width
 
@@ -66,6 +96,7 @@ data class LocalAnnotationStrokeStyle(
             append("{")
             append("\"color\":${JsonText.quote(color.id)},")
             append("\"width\":${JsonText.quote(width.id)},")
+            append("\"toolKind\":${JsonText.quote(toolKind.id)},")
             append("\"widthPx\":${widthPx.formatFloat()}")
             append("}")
         }
@@ -119,6 +150,28 @@ data class LocalAnnotationPageSummary(
             append("\"strokeCount\":$strokeCount,")
             append("\"pointCount\":$pointCount,")
             append("\"sidecarPath\":${JsonText.quote(sidecarPath)}")
+            append("}")
+        }
+    }
+}
+
+data class LocalAnnotationStrokeDiagnostic(
+    val id: String,
+    val pointCount: Int,
+    val color: String,
+    val width: String,
+    val transformModeId: String,
+    val createdAtMillis: Long
+) {
+    fun toJson(): String {
+        return buildString {
+            append("{")
+            append("\"id\":${JsonText.quote(id)},")
+            append("\"pointCount\":$pointCount,")
+            append("\"color\":${JsonText.quote(color)},")
+            append("\"width\":${JsonText.quote(width)},")
+            append("\"transformModeId\":${JsonText.quote(transformModeId)},")
+            append("\"createdAtMillis\":$createdAtMillis")
             append("}")
         }
     }
@@ -203,6 +256,35 @@ object LocalAnnotationOverlayStore {
         if (file.exists()) file.delete()
     }
 
+    fun clearNote(
+        context: Context,
+        noteSha256: String
+    ) {
+        val noteDir = overlayNoteDirectory(context, noteSha256)
+        if (!noteDir.exists() || !noteDir.isDirectory) return
+        noteDir.listFiles()
+            .orEmpty()
+            .filter { it.isFile && it.name.startsWith("page-") && it.name.endsWith(".vlo") }
+            .forEach { it.delete() }
+    }
+
+    fun pageStrokeDiagnostics(
+        context: Context,
+        noteSha256: String,
+        pageNumber: Int
+    ): List<LocalAnnotationStrokeDiagnostic> {
+        return loadPage(context, noteSha256, pageNumber).map { stroke ->
+            LocalAnnotationStrokeDiagnostic(
+                id = stroke.id,
+                pointCount = stroke.points.size,
+                color = stroke.style.color.id,
+                width = stroke.style.width.id,
+                transformModeId = stroke.transformModeId,
+                createdAtMillis = stroke.createdAtMillis
+            )
+        }
+    }
+
     fun pageSummary(
         context: Context,
         noteSha256: String,
@@ -269,6 +351,22 @@ object LocalAnnotationOverlayStore {
             append("\"annotatedPageCount\":${pages.count { it.strokeCount > 0 }},")
             append("\"pages\":[")
             append(pages.joinToString(separator = ",") { it.toJson() })
+            append("],")
+            append("\"pageStrokeDetails\":[")
+            append((1..totalPages.coerceAtLeast(1)).joinToString(separator = ",") { pageNumber ->
+                val strokeDiagnostics = pageStrokeDiagnostics(context, noteSha256, pageNumber)
+                buildString {
+                    append("{")
+                    append("\"pageNumber\":$pageNumber,")
+                    append("\"strokeIds\":[")
+                    append(strokeDiagnostics.joinToString(separator = ",") { JsonText.quote(it.id) })
+                    append("],")
+                    append("\"strokes\":[")
+                    append(strokeDiagnostics.joinToString(separator = ",") { it.toJson() })
+                    append("]")
+                    append("}")
+                }
+            })
             append("]")
             append("}")
         }
@@ -349,6 +447,7 @@ object LocalAnnotationOverlayStore {
             width.formatFloat(),
             style.color.id,
             style.width.id,
+            style.toolKind.id,
             points.joinToString(separator = ";") { point ->
                 "${point.x.formatFloat()},${point.y.formatFloat()}"
             }
@@ -360,6 +459,7 @@ object LocalAnnotationOverlayStore {
         if (parts.size < 7 || parts[0] != "stroke") return null
 
         val hasStyleFields = parts.size >= 9
+        val hasToolKindField = parts.size >= 10
         val widthValue = parts[5].toFloatOrNull() ?: LocalAnnotationStrokeStyle.DEFAULT.widthPx
         val color = if (hasStyleFields) LocalAnnotationColor.fromId(parts[6]) else LocalAnnotationColor.BLACK
         val widthClass = if (hasStyleFields) {
@@ -367,7 +467,12 @@ object LocalAnnotationOverlayStore {
         } else {
             LocalAnnotationWidth.fromWidth(widthValue)
         }
-        val pointPartIndex = if (hasStyleFields) 8 else 6
+        val toolKind = if (hasToolKindField) {
+            LocalAnnotationToolKind.fromId(parts[8])
+        } else {
+            LocalAnnotationToolKind.fromId(parts[4])
+        }
+        val pointPartIndex = if (hasToolKindField) 9 else if (hasStyleFields) 8 else 6
 
         val points = parts[pointPartIndex]
             .split(";")
@@ -385,7 +490,7 @@ object LocalAnnotationOverlayStore {
             toolType = parts[4],
             width = widthValue,
             points = points,
-            style = LocalAnnotationStrokeStyle(color = color, width = widthClass)
+            style = LocalAnnotationStrokeStyle(color = color, width = widthClass, toolKind = toolKind)
         )
     }
 }

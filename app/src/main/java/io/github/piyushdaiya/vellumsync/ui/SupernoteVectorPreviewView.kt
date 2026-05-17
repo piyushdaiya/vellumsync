@@ -10,6 +10,7 @@ import io.github.piyushdaiya.vellumsync.note.LocalAnnotationColor
 import io.github.piyushdaiya.vellumsync.note.LocalAnnotationPoint
 import io.github.piyushdaiya.vellumsync.note.LocalAnnotationStroke
 import io.github.piyushdaiya.vellumsync.note.LocalAnnotationStrokeStyle
+import io.github.piyushdaiya.vellumsync.note.SupernoteGeometryPoint
 import io.github.piyushdaiya.vellumsync.note.SupernoteStrokeGeometryPageReport
 import android.graphics.Color
 import java.util.UUID
@@ -20,6 +21,8 @@ class SupernoteVectorPreviewView(
     private var pageReport: SupernoteStrokeGeometryPageReport?,
     private var transformMode: SupernotePreviewTransformMode = SupernotePreviewTransformMode.A5X_RAW,
     private var overlayEditingEnabled: Boolean = false,
+    private var overlayEraserEnabled: Boolean = false,
+    private var panZoomEnabled: Boolean = false,
     private var overlayVisible: Boolean = true,
     private var overlayStrokes: List<LocalAnnotationStroke> = emptyList(),
     private var currentOverlayStyle: LocalAnnotationStrokeStyle = LocalAnnotationStrokeStyle.DEFAULT,
@@ -73,11 +76,14 @@ class SupernoteVectorPreviewView(
     private var activeGesture = GestureMode.NONE
     private var activeOverlayPoints: MutableList<LocalAnnotationPoint>? = null
     private var activeOverlayToolType: String = "stylus"
+    private var lastRenderDiagnostics = ActiveRenderDiagnostics()
 
     fun updatePageReport(
         pageReport: SupernoteStrokeGeometryPageReport?,
         transformMode: SupernotePreviewTransformMode = this.transformMode,
         overlayEditingEnabled: Boolean = this.overlayEditingEnabled,
+        overlayEraserEnabled: Boolean = this.overlayEraserEnabled,
+        panZoomEnabled: Boolean = this.panZoomEnabled,
         overlayVisible: Boolean = this.overlayVisible,
         overlayStrokes: List<LocalAnnotationStroke> = this.overlayStrokes,
         currentOverlayStyle: LocalAnnotationStrokeStyle = this.currentOverlayStyle,
@@ -88,6 +94,8 @@ class SupernoteVectorPreviewView(
         this.pageReport = pageReport
         this.transformMode = transformMode
         this.overlayEditingEnabled = overlayEditingEnabled
+        this.overlayEraserEnabled = overlayEraserEnabled
+        this.panZoomEnabled = panZoomEnabled
         this.overlayVisible = overlayVisible
         this.overlayStrokes = overlayStrokes
         this.currentOverlayStyle = currentOverlayStyle
@@ -102,8 +110,21 @@ class SupernoteVectorPreviewView(
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (overlayEditingEnabled) {
+        if (overlayEditingEnabled || overlayEraserEnabled) {
             return handleOverlayTouch(event)
+        }
+
+        if (!panZoomEnabled) {
+            // In normal View/Pen/Page/etc. modes the page canvas is stationary.
+            // Finger panning and pinch zoom are enabled only when the Zoom rail
+            // tool is active, which avoids accidental page movement while reading
+            // or writing with the stylus.
+            if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                performClick()
+            }
+            activeGesture = GestureMode.NONE
+            parent?.requestDisallowInterceptTouchEvent(false)
+            return true
         }
 
         when (event.actionMasked) {
@@ -186,23 +207,53 @@ class SupernoteVectorPreviewView(
             scale = viewport.scale
         )
 
+        var decodedNativeRecords = 0
+        var renderedNativeRecords = 0
+        val filteredIndexes = mutableListOf<Int>()
+        val filteredBounds = mutableListOf<String>()
+
         report.records.forEach { record ->
-            if (record.points.size < 2) return@forEach
-            val path = Path()
-            val first = record.points.first()
-            val firstMapped = transformMode.transform(first.x, first.y, report.pageWidth, report.pageHeight)
-            path.moveTo(viewport.left + firstMapped.first * viewport.scale, viewport.top + firstMapped.second * viewport.scale)
-            record.points.drop(1).forEach { point ->
+            decodedNativeRecords += 1
+            val displayPoints = if (transformMode == SupernotePreviewTransformMode.RAW_FIT && record.rawFitPoints.size >= 2) {
+                record.rawFitPoints
+            } else {
+                record.points
+            }
+            if (displayPoints.size < 2) return@forEach
+
+            val mappedPoints = displayPoints.map { point ->
                 val mapped = transformMode.transform(point.x, point.y, report.pageWidth, report.pageHeight)
-                path.lineTo(viewport.left + mapped.first * viewport.scale, viewport.top + mapped.second * viewport.scale)
+                SupernoteGeometryPoint(mapped.first, mapped.second)
+            }
+
+            if (shouldSuppressNativeRecordInActiveRenderer(recordIndex = record.recordIndex, subtype = record.subtype, source = record.source, points = mappedPoints, report = report)) {
+                filteredIndexes.add(record.recordIndex)
+                filteredBounds.add(boundsLabel(mappedPoints))
+                return@forEach
+            }
+
+            val path = Path()
+            val firstMapped = mappedPoints.first()
+            path.moveTo(viewport.left + firstMapped.x * viewport.scale, viewport.top + firstMapped.y * viewport.scale)
+            mappedPoints.drop(1).forEach { point ->
+                path.lineTo(viewport.left + point.x * viewport.scale, viewport.top + point.y * viewport.scale)
             }
             val paint = if (record.subtype == "possible_eraser_or_metadata" || record.subtype == "unknown") {
                 lightStrokePaint
             } else {
                 strokePaint
             }
+            renderedNativeRecords += 1
             canvas.drawPath(path, paint)
         }
+
+        lastRenderDiagnostics = ActiveRenderDiagnostics(
+            totalDecodedRecords = decodedNativeRecords,
+            renderedNativeRecords = renderedNativeRecords,
+            filteredDiagonalSentinelRecords = filteredIndexes.size,
+            filteredRecordIndexes = filteredIndexes.toList(),
+            filteredRecordBounds = filteredBounds.toList()
+        )
 
         if (overlayVisible) {
             drawOverlayStrokes(
@@ -222,14 +273,135 @@ class SupernoteVectorPreviewView(
             }
         }
 
-        if (overlayEditingEnabled) {
+        if (overlayEditingEnabled || overlayEraserEnabled) {
             canvas.drawText(
-                "Overlay edit: stylus writes, finger ignored",
+                if (overlayEraserEnabled) "Overlay erase: stylus removes sidecar strokes" else "Overlay edit: stylus writes, finger ignored",
                 viewport.left + 18f,
                 viewport.top + 38f,
                 textPaint
             )
         }
+    }
+
+    fun activeRenderDiagnosticsSummary(): String {
+        val diagnostics = lastRenderDiagnostics
+        return "decoded=${diagnostics.totalDecodedRecords}; rendered=${diagnostics.renderedNativeRecords}; filtered=${diagnostics.filteredDiagonalSentinelRecords}; indexes=${diagnostics.filteredRecordIndexes.joinToString()}"
+    }
+
+    private fun shouldSuppressNativeRecordInActiveRenderer(
+        recordIndex: Int,
+        subtype: String,
+        source: String,
+        points: List<SupernoteGeometryPoint>,
+        report: SupernoteStrokeGeometryPageReport
+    ): Boolean {
+        // Raw-fit mode is intentionally diagnostic. It should show filtered
+        // records so we can inspect calibration, malformed payloads, and sentinels.
+        if (transformMode == SupernotePreviewTransformMode.RAW_FIT) return false
+        if (source == "candidatePointRun-fallback-preview") return true
+        if (subtype == "unsupported_or_misdecoded_record") return true
+        if (points.size < 2) return false
+
+        val minX = points.minOf { it.x }
+        val maxX = points.maxOf { it.x }
+        val minY = points.minOf { it.y }
+        val maxY = points.maxOf { it.y }
+        val spanX = maxX - minX
+        val spanY = maxY - minY
+        val pageWidth = report.pageWidth.coerceAtLeast(1f)
+        val pageHeight = report.pageHeight.coerceAtLeast(1f)
+
+        val pathLength = pathLength(points)
+        val first = points.first()
+        val last = points.last()
+        val directDistance = kotlin.math.hypot(last.x - first.x, last.y - first.y)
+        val straightness = if (pathLength <= 0.0001f) 0f else directDistance / pathLength
+        val pageDiagonal = kotlin.math.hypot(pageWidth, pageHeight)
+
+        val deltaX = kotlin.math.abs(last.x - first.x)
+        val deltaY = kotlin.math.abs(last.y - first.y)
+        val veryLargeDiagonal = spanX > pageWidth * 0.62f && spanY > pageHeight * 0.62f && directDistance > pageDiagonal * 0.55f
+        val nearStraight = straightness > 0.86f
+        val diagonalOutlier =
+            directDistance > pageDiagonal * 0.38f &&
+                straightness > 0.82f &&
+                deltaX > pageWidth * 0.28f &&
+                deltaY > pageHeight * 0.22f
+        val endpointNearOppositeEdges =
+            ((first.x <= pageWidth * 0.08f && last.x >= pageWidth * 0.92f) || (last.x <= pageWidth * 0.08f && first.x >= pageWidth * 0.92f)) &&
+                ((first.y <= pageHeight * 0.12f && last.y >= pageHeight * 0.88f) || (last.y <= pageHeight * 0.12f && first.y >= pageHeight * 0.88f))
+
+        if (veryLargeDiagonal && nearStraight) return true
+        if (endpointNearOppositeEdges && nearStraight) return true
+        if (diagonalOutlier) return true
+
+        // Fallback point-run / unknown records are often eraser regions,
+        // marker bitmap metadata, or container sentinels rather than drawable
+        // ink. In normal A5X rendering, suppress loop-like blobs that overdraw
+        // handwriting. Raw-fit debug mode still shows them for decoder work.
+        val weaklyDecodedRecord =
+            source == "candidatePointRun-fallback-preview" ||
+                subtype == "possible_eraser_or_metadata" ||
+                subtype == "unknown"
+        if (source == "candidatePointRun-fallback-preview" && veryLargeDiagonal) return true
+        if (weaklyDecodedRecord && isLoopLikeMetadataBlob(points, pageWidth, pageHeight)) return true
+
+        return false
+    }
+
+    private fun isLoopLikeMetadataBlob(
+        points: List<SupernoteGeometryPoint>,
+        pageWidth: Float,
+        pageHeight: Float
+    ): Boolean {
+        if (points.size < 6) return false
+        val minX = points.minOf { it.x }
+        val maxX = points.maxOf { it.x }
+        val minY = points.minOf { it.y }
+        val maxY = points.maxOf { it.y }
+        val spanX = maxX - minX
+        val spanY = maxY - minY
+        if (spanX <= 0f || spanY <= 0f) return false
+
+        val pathLength = pathLength(points)
+        val first = points.first()
+        val last = points.last()
+        val directDistance = kotlin.math.hypot(last.x - first.x, last.y - first.y)
+        val maxSpan = kotlin.math.max(spanX, spanY)
+        val minSpan = kotlin.math.min(spanX, spanY)
+        val closedOrLooping = directDistance < maxSpan * 0.45f && pathLength > maxSpan * 2.0f
+        val scribbleLike = pathLength > maxSpan * 3.0f && minSpan > 18f
+        val largeEnoughToBeMetadata =
+            spanX > pageWidth * 0.055f &&
+                spanY > pageHeight * 0.018f &&
+                spanY > 16f
+
+        // Keep long, mostly-horizontal records; these may be normal pen/marker
+        // strokes once exact marker subtype decoding is added. Suppress compact
+        // loops/blobs that are currently rendered as circles over the content.
+        val horizontalBandCandidate = spanX > spanY * 6.0f && spanY < pageHeight * 0.035f
+        if (horizontalBandCandidate) return false
+
+        return largeEnoughToBeMetadata && (closedOrLooping || scribbleLike)
+    }
+
+    private fun pathLength(points: List<SupernoteGeometryPoint>): Float {
+        var total = 0f
+        for (i in 0 until points.lastIndex) {
+            val a = points[i]
+            val b = points[i + 1]
+            total += kotlin.math.hypot(b.x - a.x, b.y - a.y)
+        }
+        return total
+    }
+
+    private fun boundsLabel(points: List<SupernoteGeometryPoint>): String {
+        if (points.isEmpty()) return "empty"
+        val minX = points.minOf { it.x }.toInt()
+        val maxX = points.maxOf { it.x }.toInt()
+        val minY = points.minOf { it.y }.toInt()
+        val maxY = points.maxOf { it.y }.toInt()
+        return "x=$minX..$maxX y=$minY..$maxY"
     }
 
     private fun handleOverlayTouch(event: MotionEvent): Boolean {
@@ -240,6 +412,10 @@ class SupernoteVectorPreviewView(
         // finger touches never create annotation strokes or pan the page.
         if (pointerIndex < 0) {
             return false
+        }
+
+        if (overlayEraserEnabled) {
+            return handleOverlayEraserTouch(event, report, pointerIndex)
         }
 
         when (event.actionMasked) {
@@ -298,6 +474,97 @@ class SupernoteVectorPreviewView(
         return true
     }
 
+    private fun handleOverlayEraserTouch(
+        event: MotionEvent,
+        report: SupernoteStrokeGeometryPageReport,
+        pointerIndex: Int
+    ): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN,
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                parent?.requestDisallowInterceptTouchEvent(true)
+                eraseNearestStroke(event.getX(pointerIndex), event.getY(pointerIndex), report)
+                return true
+            }
+
+            MotionEvent.ACTION_MOVE -> {
+                for (i in 0 until event.pointerCount) {
+                    if (!isStylusTool(event.getToolType(i))) continue
+                    eraseNearestStroke(event.getX(i), event.getY(i), report)
+                }
+                return true
+            }
+
+            MotionEvent.ACTION_UP,
+            MotionEvent.ACTION_POINTER_UP,
+            MotionEvent.ACTION_CANCEL -> {
+                activeGesture = GestureMode.NONE
+                parent?.requestDisallowInterceptTouchEvent(false)
+                invalidate()
+                performClick()
+                return true
+            }
+        }
+        return true
+    }
+
+    private fun eraseNearestStroke(
+        touchX: Float,
+        touchY: Float,
+        report: SupernoteStrokeGeometryPageReport
+    ) {
+        val pagePoint = mapTouchToPreviewPagePoint(touchX, touchY, report) ?: return
+        val candidateIndex = nearestOverlayStrokeIndex(pagePoint) ?: return
+        val next = overlayStrokes.toMutableList().also { it.removeAt(candidateIndex) }
+        if (next != overlayStrokes) {
+            overlayStrokes = next
+            activeOverlayPoints = null
+            onOverlayChanged(overlayStrokes)
+            invalidate()
+        }
+    }
+
+    private fun nearestOverlayStrokeIndex(point: LocalAnnotationPoint): Int? {
+        if (overlayStrokes.isEmpty()) return null
+        var bestIndex = -1
+        var bestDistance = Float.MAX_VALUE
+        overlayStrokes.forEachIndexed { index, stroke ->
+            val distance = distanceToStroke(point, stroke)
+            if (distance < bestDistance) {
+                bestDistance = distance
+                bestIndex = index
+            }
+        }
+        val threshold = maxOf(30f, overlayStrokes.getOrNull(bestIndex)?.style?.widthPx?.times(5f) ?: 30f)
+        return bestIndex.takeIf { it >= 0 && bestDistance <= threshold }
+    }
+
+    private fun distanceToStroke(point: LocalAnnotationPoint, stroke: LocalAnnotationStroke): Float {
+        val points = stroke.points
+        if (points.isEmpty()) return Float.MAX_VALUE
+        if (points.size == 1) return hypot(point.x - points.first().x, point.y - points.first().y)
+        var best = Float.MAX_VALUE
+        for (i in 0 until points.lastIndex) {
+            best = minOf(best, distanceToSegment(point, points[i], points[i + 1]))
+        }
+        return best
+    }
+
+    private fun distanceToSegment(
+        p: LocalAnnotationPoint,
+        a: LocalAnnotationPoint,
+        b: LocalAnnotationPoint
+    ): Float {
+        val dx = b.x - a.x
+        val dy = b.y - a.y
+        val lengthSquared = dx * dx + dy * dy
+        if (lengthSquared <= 0.0001f) return hypot(p.x - a.x, p.y - a.y)
+        val t = (((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSquared).coerceIn(0f, 1f)
+        val projectionX = a.x + t * dx
+        val projectionY = a.y + t * dy
+        return hypot(p.x - projectionX, p.y - projectionY)
+    }
+
     private fun mapTouchToPreviewPagePoint(
         touchX: Float,
         touchY: Float,
@@ -350,8 +617,10 @@ class SupernoteVectorPreviewView(
     ) {
         paint.strokeWidth = style.widthPx
         paint.color = when (style.color) {
+            LocalAnnotationColor.WHITE -> Color.WHITE
+            LocalAnnotationColor.LIGHT_GRAY -> Color.rgb(190, 190, 190)
+            LocalAnnotationColor.DARK_GRAY -> Color.rgb(95, 95, 95)
             LocalAnnotationColor.BLACK -> Color.BLACK
-            LocalAnnotationColor.GRAY -> Color.rgb(130, 130, 130)
         }
     }
 
@@ -425,6 +694,14 @@ class SupernoteVectorPreviewView(
             else -> "unknown"
         }
     }
+
+    private data class ActiveRenderDiagnostics(
+        val totalDecodedRecords: Int = 0,
+        val renderedNativeRecords: Int = 0,
+        val filteredDiagonalSentinelRecords: Int = 0,
+        val filteredRecordIndexes: List<Int> = emptyList(),
+        val filteredRecordBounds: List<String> = emptyList()
+    )
 
     private data class PreviewViewport(
         val left: Float,

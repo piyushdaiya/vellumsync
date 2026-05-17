@@ -129,8 +129,10 @@ object OverlayRenderExporter {
                 strokeJoin = Paint.Join.ROUND
                 strokeWidth = stroke.style.width.width * scale
                 color = when (stroke.style.color) {
+                    LocalAnnotationColor.WHITE -> Color.WHITE
+                    LocalAnnotationColor.LIGHT_GRAY -> Color.rgb(190, 190, 190)
+                    LocalAnnotationColor.DARK_GRAY -> Color.rgb(95, 95, 95)
                     LocalAnnotationColor.BLACK -> Color.BLACK
-                    LocalAnnotationColor.GRAY -> Color.rgb(130, 130, 130)
                 }
             }
             if (stroke.points.size >= 2) {

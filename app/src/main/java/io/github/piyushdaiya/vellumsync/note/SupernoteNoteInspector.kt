@@ -36,14 +36,29 @@ object SupernoteNoteInspector {
         fileName: String,
         fileSizeBytes: Long,
         bytes: ByteArray,
-        cachedCopyPath: String? = null
+        cachedCopyPath: String? = null,
+        openedSourceKind: String = "note",
+        openedSourcePath: String? = cachedCopyPath,
+        cacheNotePresent: Boolean = cachedCopyPath != null,
+        cacheFailureReason: String? = null
     ): SupernoteInspectionReport {
         val ascii = bytes.toAsciiLikeString()
         val markerHits = markers.map { marker -> markerHit(bytes, marker) }
         val containerReport = SupernoteContainerParser.parse(bytes)
         val visualReport = SupernoteVisualDecoder.decode(bytes, containerReport)
         val totalPathProbeReport = SupernoteTotalPathStrokeProbe.probe(bytes, containerReport)
-        val strokeGeometryReport = SupernoteStrokeGeometryDecoder.decode(totalPathProbeReport)
+        val baseStrokeGeometryReport = SupernoteStrokeGeometryDecoder.decode(totalPathProbeReport)
+        val strokeGeometryReport = SupernoteTotalPathErasureMismatchGate.enrich(
+            strokeGeometryReport = baseStrokeGeometryReport,
+            bytes = bytes,
+            visualReport = visualReport
+        )
+        val totalPathStructuralReport = SupernoteTotalPathStructuralParser.parse(
+            bytes = bytes,
+            containerReport = containerReport,
+            probeReport = totalPathProbeReport,
+            pageNumberFilter = 1
+        )
 
         val versionMarker = containerReport.header.versionMarker ?: versionRegex.find(ascii)?.value
         val detectedEquipment = containerReport.header.applyEquipment ?: detectEquipment(ascii)
@@ -118,9 +133,14 @@ object SupernoteNoteInspector {
             visualReport = visualReport,
             totalPathProbeReport = totalPathProbeReport,
             strokeGeometryReport = strokeGeometryReport,
+            totalPathStructuralReport = totalPathStructuralReport,
             compatibilityStatus = compatibilityStatus,
             warnings = warnings,
-            cachedCopyPath = cachedCopyPath
+            cachedCopyPath = cachedCopyPath,
+            openedSourceKind = openedSourceKind,
+            openedSourcePath = openedSourcePath,
+            cacheNotePresent = cacheNotePresent,
+            cacheFailureReason = cacheFailureReason
         )
     }
 
