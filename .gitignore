@@ -16,3 +16,8 @@ local.properties
 local-corpus/
 *.note
 *.mark
+/.kotlin
+/.vellumsync-backups
+/vellumsync_*/
+/vellumsync_*.zip
+boox-input-dump.txt

@@ -3,6 +3,11 @@ package io.github.piyushdaiya.vellumsync.note
 import java.security.MessageDigest
 import java.util.Locale
 
+enum class SupernoteInspectionDepth {
+    FULL_DIAGNOSTICS,
+    VIEWER_FAST
+}
+
 object SupernoteNoteInspector {
     private val versionRegex = Regex("SN_FILE_VER_[0-9]+")
 
@@ -40,33 +45,54 @@ object SupernoteNoteInspector {
         openedSourceKind: String = "note",
         openedSourcePath: String? = cachedCopyPath,
         cacheNotePresent: Boolean = cachedCopyPath != null,
-        cacheFailureReason: String? = null
+        cacheFailureReason: String? = null,
+        depth: SupernoteInspectionDepth = SupernoteInspectionDepth.FULL_DIAGNOSTICS
     ): SupernoteInspectionReport {
-        val ascii = bytes.toAsciiLikeString()
-        val markerHits = markers.map { marker -> markerHit(bytes, marker) }
+        val fullDiagnostics = depth == SupernoteInspectionDepth.FULL_DIAGNOSTICS
+        val ascii = if (fullDiagnostics) bytes.toAsciiLikeString() else ""
         val containerReport = SupernoteContainerParser.parse(bytes)
-        val visualReport = SupernoteVisualDecoder.decode(bytes, containerReport)
-        val totalPathProbeReport = SupernoteTotalPathStrokeProbe.probe(bytes, containerReport)
-        val baseStrokeGeometryReport = SupernoteStrokeGeometryDecoder.decode(totalPathProbeReport)
-        val strokeGeometryReport = SupernoteTotalPathErasureMismatchGate.enrich(
-            strokeGeometryReport = baseStrokeGeometryReport,
-            bytes = bytes,
-            visualReport = visualReport
-        )
-        val totalPathStructuralReport = SupernoteTotalPathStructuralParser.parse(
+        val markerHits = if (fullDiagnostics) markers.map { marker -> markerHit(bytes, marker) } else emptyList()
+        val visualReport = if (fullDiagnostics) {
+            SupernoteVisualDecoder.decode(bytes, containerReport)
+        } else {
+            SupernoteVisualDecoder.skippedForViewer(containerReport)
+        }
+        val totalPathProbeReport = SupernoteTotalPathStrokeProbe.probe(
             bytes = bytes,
             containerReport = containerReport,
-            probeReport = totalPathProbeReport,
-            pageNumberFilter = 1
+            includeDiagnostics = fullDiagnostics
         )
+        val baseStrokeGeometryReport = SupernoteStrokeGeometryDecoder.decode(totalPathProbeReport)
+        val strokeGeometryReport = if (fullDiagnostics) {
+            SupernoteTotalPathErasureMismatchGate.enrich(
+                strokeGeometryReport = baseStrokeGeometryReport,
+                bytes = bytes,
+                visualReport = visualReport
+            )
+        } else {
+            baseStrokeGeometryReport.copy(
+                formatStatus = "Viewer-fast vector render model built without visual-layer diagnostics.",
+                warnings = baseStrokeGeometryReport.warnings + "Viewer open skipped visual-layer probing and erasure mismatch diagnostics; Export note diagnostics JSON still runs the full parser."
+            )
+        }
+        val totalPathStructuralReport = if (fullDiagnostics) {
+            SupernoteTotalPathStructuralParser.parse(
+                bytes = bytes,
+                containerReport = containerReport,
+                probeReport = totalPathProbeReport,
+                pageNumberFilter = 1
+            )
+        } else {
+            skippedStructuralReport()
+        }
 
-        val versionMarker = containerReport.header.versionMarker ?: versionRegex.find(ascii)?.value
-        val detectedEquipment = containerReport.header.applyEquipment ?: detectEquipment(ascii)
+        val versionMarker = containerReport.header.versionMarker ?: if (fullDiagnostics) versionRegex.find(ascii)?.value else null
+        val detectedEquipment = containerReport.header.applyEquipment ?: if (fullDiagnostics) detectEquipment(ascii) else null
         val estimatedPageCount = containerReport.pageCount
 
         val hasNoteMarker = containerReport.header.fileType == "NOTE" || hasMarker(markerHits, "NOTE")
-        val hasMainLayer = hasMarker(markerHits, "MAINLAYER")
-        val hasBackgroundLayer = hasMarker(markerHits, "BGLAYER")
+        val hasMainLayer = containerReport.pageSections.any { it.layerOffsets.mainLayerOffset != null } || hasMarker(markerHits, "MAINLAYER")
+        val hasBackgroundLayer = containerReport.pageSections.any { it.layerOffsets.backgroundLayerOffset != null } || hasMarker(markerHits, "BGLAYER")
         val hasLayerInfo = containerReport.pageSections.any { it.layerInfoPresent } || hasMarker(markerHits, "LAYERINFO")
         val hasLayerSequence = containerReport.pageSections.any { it.layerSeq != null } || hasMarker(markerHits, "LAYERSEQ")
         val hasTotalPath = containerReport.pageSections.any { it.layerOffsets.totalPathOffset != null } || hasMarker(markerHits, "TOTALPATH")
@@ -92,6 +118,9 @@ object SupernoteNoteInspector {
             }
             if (!hasLinkMetadata && hasExternalLinkInfoField) {
                 add("EXTERNALLINKINFO field is present, but no real link metadata markers were detected.")
+            }
+            if (!fullDiagnostics) {
+                add("Viewer-fast open skipped marker-sweep and structural diagnostics; use Export note diagnostics JSON for the full diagnostic report.")
             }
             addAll(containerReport.parserWarnings)
         }.distinct()
@@ -141,6 +170,39 @@ object SupernoteNoteInspector {
             openedSourcePath = openedSourcePath,
             cacheNotePresent = cacheNotePresent,
             cacheFailureReason = cacheFailureReason
+        )
+    }
+
+    fun inspectForViewer(
+        fileName: String,
+        fileSizeBytes: Long,
+        bytes: ByteArray,
+        cachedCopyPath: String? = null,
+        openedSourceKind: String = "note",
+        openedSourcePath: String? = cachedCopyPath,
+        cacheNotePresent: Boolean = cachedCopyPath != null,
+        cacheFailureReason: String? = null
+    ): SupernoteInspectionReport {
+        return inspect(
+            fileName = fileName,
+            fileSizeBytes = fileSizeBytes,
+            bytes = bytes,
+            cachedCopyPath = cachedCopyPath,
+            openedSourceKind = openedSourceKind,
+            openedSourcePath = openedSourcePath,
+            cacheNotePresent = cacheNotePresent,
+            cacheFailureReason = cacheFailureReason,
+            depth = SupernoteInspectionDepth.VIEWER_FAST
+        )
+    }
+
+    private fun skippedStructuralReport(): SupernoteTotalPathStructuralReport {
+        return SupernoteTotalPathStructuralReport(
+            format = "VellumSync SNLib-guided TOTALPATH structural parser report",
+            parserModel = "skipped-for-viewer-fast-open",
+            selectedPageNumber = null,
+            pageReports = emptyList(),
+            warnings = listOf("Structural diagnostics skipped during viewer open for faster note loading. Export diagnostics to run the full structural parser.")
         )
     }
 

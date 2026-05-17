@@ -99,6 +99,10 @@ object SupernoteStructuralStrokeRenderBridge {
                 if (stroke.warnings.any { warning -> warning.contains("pressure", ignoreCase = true) || warning.contains("tilt", ignoreCase = true) }) {
                     possibleMetadataRecords += 1
                 }
+                val styleMetadata = SupernoteStrokeStyleDecoder.decode(stroke.firstU32LeFields, stroke.recordIndex)
+                if (styleMetadata.isEraser) {
+                    possibleMetadataRecords += 1
+                }
                 val bounds = stroke.bounds?.let {
                     SupernoteGeometryBounds(
                         minX = it.minX,
@@ -112,6 +116,7 @@ object SupernoteStructuralStrokeRenderBridge {
                         recordIndex = stroke.recordIndex,
                         category = stroke.category,
                         subtype = when {
+                            styleMetadata.isEraser -> "eraser_knockout"
                             stroke.flagDrawState.contains("unknown", ignoreCase = true) -> "structured-unknown-flag-draw"
                             stroke.strokeLayer?.contains("BG", ignoreCase = true) == true -> "structured-background-stroke"
                             else -> "structured-stroke"
@@ -133,7 +138,8 @@ object SupernoteStructuralStrokeRenderBridge {
                                 y = point.y.toFloat()
                             )
                         },
-                        warnings = stroke.warnings + listOf(
+                        styleMetadata = styleMetadata,
+                        warnings = stroke.warnings + styleMetadata.warnings + listOf(
                             "boundary-source=${stroke.boundarySource}",
                             "flag-draw=${stroke.flagDrawState}",
                             "stroke-layer=${stroke.strokeLayer ?: "TOTALPATH"}"
@@ -165,6 +171,11 @@ object SupernoteStructuralStrokeRenderBridge {
             filteredDiagonalSentinelRecords = 0,
             filteredRecordIndexes = emptyList(),
             filteredRecordBounds = emptyList(),
+            strokeStyleCounts = SupernoteStrokeStyleDecoder.summarizeStyles(records),
+            strokeColorCounts = SupernoteStrokeStyleDecoder.summarizeColors(records),
+            eraserRecordCount = records.count { it.styleMetadata.isEraser },
+            eraserKnockoutAppliedCount = records.count { it.styleMetadata.isEraser && it.points.size >= 2 },
+            unknownStrokeMetadataSamples = SupernoteStrokeStyleDecoder.unknownSamples(records),
             records = records,
             warnings = page.warnings + listOf(
                 "structural-render-bridge=${diagnostics.drawableStrokeCount}/${diagnostics.structuralStrokeCount}",

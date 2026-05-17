@@ -9,6 +9,13 @@ data class ImportedNoteCacheResult(
     val metadataFile: File
 )
 
+data class ImportSourceValidationDecision(
+    val openedSourceKind: String,
+    val cacheNotePresent: Boolean,
+    val noteBytes: ByteArray?,
+    val cacheFailureReason: String?
+)
+
 data class CachedImportedNote(
     val fileName: String,
     val sha256: String,
@@ -20,6 +27,49 @@ data class CachedImportedNote(
 
 // marker=vellumsync-import-note-async-pipeline-import-logging-v0
 object ImportedNoteCache {
+
+    fun validateImportSource(
+        fileName: String,
+        bytes: ByteArray,
+        openedSourcePath: String
+    ): ImportSourceValidationDecision {
+        val trimmedPrefix = bytes
+            .asSequence()
+            .dropWhile { byte -> (byte.toInt() and 0xff).toChar().isWhitespace() }
+            .take(256)
+            .map { byte -> (byte.toInt() and 0xff).toChar() }
+            .joinToString(separator = "")
+        val lowerName = fileName.lowercase()
+        val looksLikeDiagnosticsJson = lowerName.endsWith(".json") ||
+            (trimmedPrefix.startsWith("{") &&
+                trimmedPrefix.contains("fileName") &&
+                (trimmedPrefix.contains("containerReport") || trimmedPrefix.contains("visualReport")))
+        val looksLikeSupernoteNote = bytes.size >= 8 &&
+            bytes.decodeToString(endIndex = minOf(bytes.size, 96), throwOnInvalidSequence = false)
+                .contains("SN_FILE_VER_")
+
+        return when {
+            looksLikeDiagnosticsJson -> ImportSourceValidationDecision(
+                openedSourceKind = "diagnostics_json",
+                cacheNotePresent = false,
+                noteBytes = null,
+                cacheFailureReason = "Selected source appears to be a VellumSync diagnostics JSON export, not a Supernote .note file: $openedSourcePath"
+            )
+            lowerName.endsWith(".note") || looksLikeSupernoteNote -> ImportSourceValidationDecision(
+                openedSourceKind = "note",
+                cacheNotePresent = true,
+                noteBytes = bytes,
+                cacheFailureReason = null
+            )
+            else -> ImportSourceValidationDecision(
+                openedSourceKind = "unknown",
+                cacheNotePresent = false,
+                noteBytes = null,
+                cacheFailureReason = "Selected source is not recognized as a Supernote .note file: $openedSourcePath"
+            )
+        }
+    }
+
     fun sha256(bytes: ByteArray): String {
         val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
         return digest.joinToString(separator = "") { byte -> "%02x".format(byte) }
@@ -30,13 +80,19 @@ object ImportedNoteCache {
         fileName: String,
         bytes: ByteArray
     ): ImportedNoteCacheResult {
+        val validation = validateImportSource(
+            fileName = fileName,
+            bytes = bytes,
+            openedSourcePath = fileName
+        )
+        val noteBytes = validation.noteBytes ?: error(validation.cacheFailureReason ?: "Selected file is not a Supernote .note file.")
         val safeName = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_")
-        val sha = sha256(bytes)
+        val sha = sha256(noteBytes)
         val importDir = File(context.filesDir, "imported-notes/$sha")
         importDir.mkdirs()
 
         val noteFile = File(importDir, safeName)
-        noteFile.writeBytes(bytes)
+        noteFile.writeBytes(noteBytes)
 
         val metadataFile = File(importDir, "diagnostics.json")
         if (metadataFile.exists()) {
@@ -55,12 +111,18 @@ object ImportedNoteCache {
         bytes: ByteArray,
         preliminaryReport: SupernoteInspectionReport
     ): ImportedNoteCacheResult {
+        val validation = validateImportSource(
+            fileName = fileName,
+            bytes = bytes,
+            openedSourcePath = fileName
+        )
+        val noteBytes = validation.noteBytes ?: error(validation.cacheFailureReason ?: "Selected file is not a Supernote .note file.")
         val safeName = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_")
         val importDir = File(context.filesDir, "imported-notes/${preliminaryReport.sha256}")
         importDir.mkdirs()
 
         val noteFile = File(importDir, safeName)
-        noteFile.writeBytes(bytes)
+        noteFile.writeBytes(noteBytes)
 
         val metadataFile = File(importDir, "diagnostics.json")
         metadataFile.writeText(preliminaryReport.copy(cachedCopyPath = noteFile.absolutePath).toJson())

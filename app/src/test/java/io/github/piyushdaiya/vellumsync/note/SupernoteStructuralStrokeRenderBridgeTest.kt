@@ -64,6 +64,7 @@ class SupernoteStructuralStrokeRenderBridgeTest {
             pointArrayAbsoluteOffset = 36,
             recordStartAbsoluteOffset = 100,
             recordEndAbsoluteOffset = 164,
+            firstU32LeFields = emptyList(),
             screenWidth = 1404,
             screenHeight = 1872,
             strokeLayer = "MAINLAYER",

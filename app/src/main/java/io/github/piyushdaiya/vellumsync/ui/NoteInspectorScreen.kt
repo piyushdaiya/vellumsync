@@ -545,6 +545,12 @@ private fun StrokeGeometryReportCard(report: SupernoteStrokeGeometryReport) {
                     Text(text = "Preview page ${page.pageNumber}")
                     Text(text = "Records rendered=${page.renderedRecords}/${page.decodedRecords} skipped=${page.skippedRecords}")
                     Text(text = "Unknown=${page.unknownSubtypeRecords} possibleEraserOrMetadata=${page.possibleEraserOrMetadataRecords}")
+                    Text(text = "Eraser records=${page.eraserRecordCount} knockouts=${page.eraserKnockoutAppliedCount}")
+                    Text(text = "Style counts=${countMapSummary(page.strokeStyleCounts)}")
+                    Text(text = "Color counts=${countMapSummary(page.strokeColorCounts)}")
+                    if (page.unknownStrokeMetadataSamples.isNotEmpty()) {
+                        Text(text = "Unknown style samples=${page.unknownStrokeMetadataSamples.joinToString()}")
+                    }
                     Text(text = "Raw bounds=${page.rawBounds?.minX ?: "?"}..${page.rawBounds?.maxX ?: "?"}, ${page.rawBounds?.minY ?: "?"}..${page.rawBounds?.maxY ?: "?"}")
                     Text(text = "Geometry source transform=${page.transform}")
                     Text(text = "Preview transform=${selectedTransformMode.value.id}")
@@ -579,10 +585,13 @@ private fun StrokeGeometryReportCard(report: SupernoteStrokeGeometryReport) {
                     Text(text = "Transform mode=${selectedTransformMode.value.label}")
                     Text(text = "Decoded=${page.decodedRecords} Rendered=${page.renderedRecords} Skipped=${page.skippedRecords}")
                     Text(text = "Unknown=${page.unknownSubtypeRecords} Possible eraser/metadata=${page.possibleEraserOrMetadataRecords}")
+                    Text(text = "Eraser=${page.eraserRecordCount} Knockout applied=${page.eraserKnockoutAppliedCount}")
+                    Text(text = "Stroke styles=${countMapSummary(page.strokeStyleCounts)}")
+                    Text(text = "Stroke colors=${countMapSummary(page.strokeColorCounts)}")
 
                     Text(text = "Record summary")
                     page.records.take(16).forEach { record ->
-                        Text(text = "#${record.recordIndex} ${record.subtype} source=${record.source} renderedPoints=${record.renderedPointCount} decodedPoints=${record.decodedPointCount}")
+                        Text(text = "#${record.recordIndex} ${record.subtype} ${record.styleMetadata.styleLabel} gray=${record.styleMetadata.mappedGray} width=${record.styleMetadata.strokeWidthPx} eraser=${record.styleMetadata.isEraser} source=${record.source} renderedPoints=${record.renderedPointCount} decodedPoints=${record.decodedPointCount}")
                         record.rawBounds?.let { bounds ->
                             Text(text = "  raw=${bounds.minX}..${bounds.maxX}, ${bounds.minY}..${bounds.maxY}")
                         }
@@ -648,6 +657,10 @@ private fun MarkerReportCard(markerHits: List<MarkerHit>) {
             }
         }
     }
+}
+
+private fun countMapSummary(values: Map<String, Int>): String {
+    return values.entries.joinToString { entry -> "${entry.key}:${entry.value}" }
 }
 
 private fun queryDisplayName(

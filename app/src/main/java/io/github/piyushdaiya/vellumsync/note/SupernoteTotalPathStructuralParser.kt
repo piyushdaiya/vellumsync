@@ -56,6 +56,7 @@ data class SupernoteStructuredStroke(
     val pointArrayAbsoluteOffset: Int?,
     val recordStartAbsoluteOffset: Int,
     val recordEndAbsoluteOffset: Int,
+    val firstU32LeFields: List<Long>,
     val screenWidth: Int,
     val screenHeight: Int,
     val strokeLayer: String?,
@@ -84,6 +85,7 @@ data class SupernoteStructuredStroke(
             append("\"pointArrayAbsoluteOffset\":${pointArrayAbsoluteOffset ?: "null"},")
             append("\"recordStartAbsoluteOffset\":$recordStartAbsoluteOffset,")
             append("\"recordEndAbsoluteOffset\":$recordEndAbsoluteOffset,")
+            append("\"firstU32LeFields\":[${firstU32LeFields.joinToString(separator = ",")}],")
             append("\"screenWidth\":$screenWidth,")
             append("\"screenHeight\":$screenHeight,")
             append("\"strokeLayer\":${JsonText.quote(strokeLayer)},")
@@ -329,6 +331,7 @@ object SupernoteTotalPathStructuralParser {
             pointArrayAbsoluteOffset = decoded?.pointArrayAbsoluteOffset,
             recordStartAbsoluteOffset = recordStart,
             recordEndAbsoluteOffset = recordEnd,
+            firstU32LeFields = record.firstU32LeFields,
             screenWidth = screenWidth,
             screenHeight = screenHeight,
             strokeLayer = inferStrokeLayer(section, recordBytes),

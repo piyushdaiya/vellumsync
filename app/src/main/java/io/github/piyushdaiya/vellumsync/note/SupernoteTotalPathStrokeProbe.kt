@@ -349,10 +349,11 @@ object SupernoteTotalPathStrokeProbe {
 
     fun probe(
         bytes: ByteArray,
-        containerReport: SupernoteContainerReport
+        containerReport: SupernoteContainerReport,
+        includeDiagnostics: Boolean = true
     ): SupernoteTotalPathProbeReport {
         val pageReports = containerReport.pageSections.map { page ->
-            probePage(bytes = bytes, page = page)
+            probePage(bytes = bytes, page = page, includeDiagnostics = includeDiagnostics)
         }
         val pagesWithTotalPath = pageReports.count { it.totalPathOffset != null }
         val totalBytes = pageReports.sumOf { it.estimatedPayloadByteLength ?: 0 }
@@ -364,11 +365,15 @@ object SupernoteTotalPathStrokeProbe {
             if (missing > 0) {
                 add("$missing page(s) do not expose a TOTALPATH offset.")
             }
+            if (!includeDiagnostics) {
+                add("Viewer-fast open skipped marker hits, numeric-run scans, binary summaries, and preview contexts for faster note loading.")
+            }
             add("TOTALPATH Record Chain + Point Array Decode v0 is read-only; vector rendering and write-back are deferred.")
         }
         val status = when {
             pagesWithTotalPath == 0 -> "No TOTALPATH payloads detected."
-            else -> "TOTALPATH record-boundary model, record-chain decoder, and point-array decode v0 built; vector rendering is deferred."
+            includeDiagnostics -> "TOTALPATH record-boundary model, record-chain decoder, and point-array decode v0 built; vector rendering is deferred."
+            else -> "TOTALPATH render model built in viewer-fast mode; diagnostics-only scans are deferred."
         }
         return SupernoteTotalPathProbeReport(
             formatStatus = status,
@@ -381,7 +386,8 @@ object SupernoteTotalPathStrokeProbe {
 
     private fun probePage(
         bytes: ByteArray,
-        page: SupernotePageSection
+        page: SupernotePageSection,
+        includeDiagnostics: Boolean
     ): SupernoteTotalPathPageReport {
         val totalPathOffset = page.layerOffsets.totalPathOffset
         if (totalPathOffset == null || totalPathOffset <= 0) {
@@ -418,7 +424,7 @@ object SupernoteTotalPathStrokeProbe {
         val start = totalPathOffset.coerceIn(0, bytes.size)
         val end = estimateEndOffset(start, page.pageSectionOffset, bytes.size)
         val payload = bytes.copyOfRange(start, end)
-        val markerHits = semanticMarkers.map { marker -> markerHit(payload, start, marker) }
+        val markerHits = if (includeDiagnostics) semanticMarkers.map { marker -> markerHit(payload, start, marker) } else emptyList()
         val semanticMarkersForRecords = findRecordCategoryMarkers(payload, start)
         val declaredPayloadSize = readDeclaredPayloadSize(payload)
         val declaredRecordCount = readDeclaredRecordCount(payload)
@@ -431,11 +437,15 @@ object SupernoteTotalPathStrokeProbe {
             semanticMarkers = semanticMarkersForRecords,
             declaredRecordCount = declaredRecordCount
         )
-        val numericRuns = findNumericRuns(payload, start)
-        val binarySummary = summarizeBinary(payload)
-        val candidateToolSignals = markerHits
-            .filter { it.count > 0 && it.marker !in listOf("TOTALPATH", "POINT", "POINTS") }
-            .map { "${it.marker}: count=${it.count}" }
+        val numericRuns = if (includeDiagnostics) findNumericRuns(payload, start) else emptyList()
+        val binarySummary = if (includeDiagnostics) summarizeBinary(payload) else null
+        val candidateToolSignals = if (includeDiagnostics) {
+            markerHits
+                .filter { it.count > 0 && it.marker !in listOf("TOTALPATH", "POINT", "POINTS") }
+                .map { "${it.marker}: count=${it.count}" }
+        } else {
+            emptyList()
+        }
         val recordsDecodedByLengthChain = candidateRecords.count { it.decodedByLengthChain }
         val recordsWithDecodedPointArrays = candidateRecords.count { it.decodedPointArray != null }
         val recordChainDecoderStatus = when {
@@ -481,8 +491,11 @@ object SupernoteTotalPathStrokeProbe {
             if (recordCountMatchesSemanticMarkers == true) {
                 add("Declared record count matches semantic marker count.")
             }
-            if (numericRuns.isNotEmpty()) {
+            if (includeDiagnostics && numericRuns.isNotEmpty()) {
                 add("${numericRuns.size} coordinate/pressure-like numeric run(s) found.")
+            }
+            if (!includeDiagnostics) {
+                add("Viewer-fast TOTALPATH decode kept render records and skipped diagnostics-only scans.")
             }
             if (candidateRecords.isNotEmpty()) {
                 add("${candidateRecords.size} candidate record report(s) generated; record decode window=$MAX_RECORD_REPORTS_PER_PAGE.")
@@ -509,7 +522,7 @@ object SupernoteTotalPathStrokeProbe {
             if (candidateRecords.size >= MAX_RECORD_REPORTS_PER_PAGE && declaredRecordCount != null && declaredRecordCount > MAX_RECORD_REPORTS_PER_PAGE) {
                 add("TOTALPATH record decode reached MAX_RECORD_REPORTS_PER_PAGE=$MAX_RECORD_REPORTS_PER_PAGE; additional records may exist after the diagnostics/render window.")
             }
-            if (numericRuns.isEmpty()) {
+            if (includeDiagnostics && numericRuns.isEmpty()) {
                 add("No coordinate-like numeric runs were detected by the conservative heuristic.")
             }
         }

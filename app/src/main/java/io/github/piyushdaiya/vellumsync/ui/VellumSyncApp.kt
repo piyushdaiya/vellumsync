@@ -26,7 +26,6 @@ fun VellumSyncApp() {
     // normal launch screen.
     val currentScreen = remember { mutableStateOf(Screen.RECENT_NOTES) }
     val selectedNote = remember { mutableStateOf<ViewerNoteSelection?>(null) }
-    val deviceProfile = remember { DeviceCapabilityDetector.detect() }
 
     LaunchedEffect(currentScreen.value, selectedNote.value?.notePath) {
         Log.i("VellumSyncOpen", "screen=${currentScreen.value} selected=${selectedNote.value?.notePath ?: "none"}")
@@ -44,10 +43,13 @@ fun VellumSyncApp() {
                     }
                 )
 
-                Screen.DEVICE_CHECK -> DeviceCheckScreen(
-                    profile = deviceProfile,
-                    onContinue = { currentScreen.value = Screen.RECENT_NOTES }
-                )
+                Screen.DEVICE_CHECK -> {
+                    val deviceProfile = remember { DeviceCapabilityDetector.detect() }
+                    DeviceCheckScreen(
+                        profile = deviceProfile,
+                        onContinue = { currentScreen.value = Screen.RECENT_NOTES }
+                    )
+                }
 
                 Screen.NOTE_INSPECTOR -> NoteInspectorScreen(
                     onBack = { currentScreen.value = Screen.RECENT_NOTES },

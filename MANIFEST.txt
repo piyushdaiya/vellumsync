@@ -1,0 +1,18 @@
+vellumsync-apache2-license-docs-v0
+
+Adds:
+- LICENSE with Apache License 2.0 text
+- NOTICE with VellumSync copyright, compatibility, and trademark notice
+- Legal.md with license and compatibility guidance
+
+Updates:
+- README.md
+- Architecture.md
+- UserGuide.md
+- Scope.md
+- roadmap.md
+- Release.md
+
+Scripts:
+- scripts/apply_vellumsync_apache2_license_docs_v0.sh
+- scripts/validate_vellumsync_apache2_license_docs_v0.sh

@@ -1,0 +1,12 @@
+VellumSync
+Copyright 2026 Piyush Daiya and VellumSync contributors.
+
+This product includes software and documentation developed for the VellumSync project.
+
+VellumSync is an independent compatibility-focused Android application. It is not affiliated with, endorsed by, or sponsored by Ratta Supernote, BOOX, Onyx, Android, Google, or any other device/platform owner referenced for compatibility testing.
+
+Product names, service names, trademarks, and registered trademarks are the property of their respective owners and are used only for compatibility, platform, and testing references.
+
+Unless a file states otherwise, repository source code, documentation, scripts, and project configuration are licensed under the Apache License, Version 2.0.
+
+Private user-created notes, exported PDFs, screenshots, diagnostics JSON files, and local test corpora are not covered by the project license unless they are intentionally committed as public fixtures with explicit permission and their own licensing notice.

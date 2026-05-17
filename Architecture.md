@@ -2,371 +2,380 @@
 
 ## 1. Product definition
 
-VellumSync is a local-first Android e-ink stylus app for opening, inspecting, rendering, and eventually syncing Supernote-compatible `.note` files on Android tablets.
+VellumSync is a local-first Android e-ink note app for opening, viewing, inspecting, annotating, and eventually syncing Supernote-compatible `.note` files on Android tablets.
 
-Initial Android target:
-
-```text
-BOOX Note Air 2 Plus and similar stylus-capable BOOX e-ink devices
-```
-
-Initial Supernote compatibility profile:
+The current product priority is:
 
 ```text
-Device: Supernote A5X
-Software: Chauvet 2.24.37
-Observed note family: SN_FILE_VER_20230015
+BOOX Note Air 2 Plus first
+Android stylus tablets second
+Supernote-compatible read-only viewing before write-back
+Fast viewer open before deep diagnostics
 ```
 
 ## 2. Design principles
 
 ```text
 Local-first
+Viewer-first
 Read-only before write-back
-Never overwrite a Supernote file directly
-Preserve unknown data
-Separate Android-native notes from Supernote-compatible notes
-Treat .note compatibility as versioned and device-specific
-Use real Supernote files as validation corpus
+Never overwrite original Supernote files
+Keep local overlay data separate from Supernote source files
+Treat unknown .note fields as data to preserve or diagnose, not data to discard
+Keep diagnostics explicit and outside the normal open path
+Prefer simple Android APIs before BOOX/private APIs
+Use real Supernote exports as visual acceptance references
 ```
 
-## 3. High-level architecture
+## 3. Runtime navigation model
+
+```text
+VellumSyncApp
+│
+├── Recent Notes
+│   ├── import/open cached .note
+│   ├── open viewer
+│   └── open diagnostics screen
+│
+├── Note Viewer
+│   ├── fast viewer inspection
+│   ├── page render surface
+│   ├── local overlay surface
+│   ├── tool rail and panels
+│   └── explicit export actions
+│
+├── Note Diagnostics
+│   ├── full parser/marker inspection
+│   ├── full diagnostic JSON export
+│   ├── visual payload probe export
+│   └── TOTALPATH structural export
+│
+└── Device Check
+    ├── Android input-device scan
+    ├── stylus capability summary
+    └── runtime stylus probe
+```
+
+The app no longer performs device diagnostics on startup. Device Check is available when needed, but the launch surface is the note workflow.
+
+## 4. High-level system architecture
 
 ```text
 VellumSync Android App
 │
-├── App Shell
-│   ├── Home
-│   ├── Device Check
-│   ├── Import
-│   ├── Note Inspector
-│   └── Settings
+├── UI Layer
+│   ├── Compose app shell
+│   ├── Recent notes surface
+│   ├── XML-backed note viewer surface
+│   ├── e-ink-oriented tool rail
+│   └── diagnostics/export screens
 │
 ├── Device Layer
 │   ├── Android device profile
-│   ├── Stylus capability detection
-│   ├── Runtime pen probe
-│   └── Future e-ink adapter
+│   ├── input-device capability scan
+│   ├── MotionEvent stylus probe
+│   └── persisted rail/stylus preferences
+│
+├── Import and Cache Layer
+│   ├── Android document picker
+│   ├── read-only cached copy
+│   ├── import source validation
+│   ├── cache metadata
+│   └── recent-note library index
 │
 ├── Supernote Compatibility Layer
-│   ├── .note file detector
-│   ├── container/header parser
-│   ├── page/layer marker scanner
-│   ├── metadata marker scanner
-│   ├── future visual decoder
-│   ├── future stroke decoder
-│   └── future write-back validator
-│
-├── Storage Layer
-│   ├── imported file references
-│   ├── local metadata
-│   ├── local cache
-│   ├── sidecar overlays
-│   └── future sync state
+│   ├── header and marker inspection
+│   ├── container/page/layer parser
+│   ├── visual layer discovery
+│   ├── RATTA_RLE visual renderer
+│   ├── TOTALPATH vector parser
+│   ├── stroke style/grayscale/eraser decoder
+│   └── full diagnostics model
 │
 ├── Rendering Layer
-│   ├── future page bitmap renderer
-│   ├── future stroke renderer
-│   ├── future template renderer
-│   └── future PDF comparison renderer
+│   ├── visual-layer renderer
+│   ├── vector fallback renderer
+│   ├── A5X transform calibration
+│   ├── PDF-reference comparison support
+│   └── local overlay renderer
 │
-└── Sync Layer
-    ├── future local folder sync
-    ├── future cloud-folder sync
-    ├── future Supernote-compatible sync flow
+├── Local Overlay Layer
+│   ├── stylus-only sidecar strokes
+│   ├── page-level overlay storage
+│   ├── overlay undo/clear operations
+│   └── overlay PNG/PDF/package export
+│
+└── Future Sync/Write Layer
+    ├── canonical note model
+    ├── package export model
+    ├── write-back research harness
+    ├── Supernote-compatible writer candidate
     └── future conflict resolver
 ```
 
-## 4. Initial module strategy
-
-Start as a single Android app module.
-
-Reason:
+## 5. Package layout
 
 ```text
-- Faster Android Studio setup
-- Easier Compose iteration
-- Easier device deployment
-- Easier debugging of file picker and MotionEvent stylus input
-```
-
-Later split into modules:
-
-```text
-:app
-:core-model
-:core-device
-:core-note-format
-:core-storage
-:core-rendering
-:feature-device-check
-:feature-import
-:feature-note-inspector
-:feature-editor
-:feature-sync
-```
-
-## 5. Current package layout
-
-```text
-app/src/main/java/io/github/piyushdaiya/vellumsync/
+io.github.piyushdaiya.vellumsync
 ├── MainActivity.kt
 ├── device/
 │   ├── DeviceCapabilityDetector.kt
 │   ├── DeviceProfile.kt
+│   ├── StylusProbePersistence.kt
 │   └── StylusProbeView.kt
 ├── note/
+│   ├── ImportedNoteCache.kt
+│   ├── LocalAnnotationOverlayStore.kt
+│   ├── OverlayRenderExporter.kt
+│   ├── SupernoteContainerParser.kt
+│   ├── SupernoteFeatureCompatibility.kt
 │   ├── SupernoteInspectionReport.kt
-│   └── SupernoteNoteInspector.kt
-└── ui/
-    ├── VellumSyncApp.kt
-    ├── DeviceCheckScreen.kt
-    └── NoteInspectorScreen.kt
+│   ├── SupernoteNoteInspector.kt
+│   ├── SupernoteRattaRleVisualLayerRenderer.kt
+│   ├── SupernoteStrokeGeometry.kt
+│   ├── SupernoteStrokeStyleDecoder.kt
+│   ├── SupernoteStructuralStrokeRenderBridge.kt
+│   ├── SupernoteTotalPathStructuralParser.kt
+│   ├── SupernoteTotalPathTransformCalibrator.kt
+│   ├── SupernoteVisualDecoder.kt
+│   ├── SupernoteVisualPayloadProbe.kt
+│   ├── VellumCanonicalNoteModel.kt
+│   └── VellumSyncPackageExporter.kt
+├── ui/
+│   ├── VellumSyncApp.kt
+│   ├── RecentNotesScreen.kt
+│   ├── NoteViewerScreen.kt
+│   ├── VellumNoteSurfaceView.kt
+│   ├── SupernoteVectorPreviewView.kt
+│   ├── NoteInspectorScreen.kt
+│   ├── DeviceCheckScreen.kt
+│   ├── RailPositionPersistence.kt
+│   └── ViewerTransformPersistence.kt
+└── util/
+    └── JsonText.kt
 ```
 
-## 6. Device capability detection
+## 6. Open-path performance boundary
 
-VellumSync should not assume every Android device supports pen input.
-
-Detection strategy:
+Normal note opening must use the viewer path:
 
 ```text
-1. Scan Android InputDevice sources for stylus-like input.
-2. Check known device manufacturer/model.
-3. Allow runtime stylus probe using MotionEvent.TOOL_TYPE_STYLUS.
-4. Allow manual override later in settings.
+ImportedNoteCache.readCachedNote
+→ SupernoteNoteInspector.inspectForViewer
+→ viewer-critical page/layer/vector data
+→ render current page
 ```
 
-Device status values:
+The viewer path must not run:
 
 ```text
-Detected
-Not detected
-Unknown
-Probe required
+- full marker sweeps
+- full diagnostic JSON generation
+- visual payload probe export
+- binary numeric-run summaries
+- expensive all-page comparison work
+- device capability detection
+- write-back research harnesses
 ```
 
-Example messages:
+Those tasks belong to explicit diagnostics/export flows.
+
+## 7. Diagnostics boundary
+
+Full diagnostics are allowed only when the user asks for them through the diagnostics screen or an export action.
+
+Diagnostics may include:
 
 ```text
-Stylus support detected.
-VellumSync is ready for handwritten .note workflows on this device.
-
-No active stylus support was detected.
-You can browse and inspect compatible .note files, but handwriting/editing features require a stylus-capable Android e-ink device.
-
-Stylus support could not be confirmed.
-Open the test canvas and touch the screen with your pen to complete device detection.
+- header preview hex/ascii
+- version and equipment markers
+- page/layer offsets
+- visual layer record reports
+- RATTA_RLE decode attempts
+- TOTALPATH structural reports
+- stroke style counts
+- stroke color counts
+- eraser record counts
+- unknown metadata samples
+- compatibility warnings
 ```
 
-## 7. Supernote file detection
+Diagnostics are read-only. They must not modify `.note` bytes.
 
-The first parser is not a full decoder. It is a safe binary marker inspector.
+## 8. Import and cache model
 
-Initial markers:
+VellumSync imports external notes by copying them into app-owned storage:
 
 ```text
-SN_FILE_VER_
-SN_FILE_VER_20230015
-NOTE
-A5X
-A6X
-A5X2
-A6X2
-PAGE
-PAGESTYLE
-MAINLAYER
-BGLAYER
-LAYERINFO
-LAYERSEQ
-TOTALPATH
-TITLE
-KEYWORD
-LINK
-STAR
+external document URI
+→ read bytes through ContentResolver
+→ preliminary read-only inspection
+→ cache under imported-notes/<sha256>/
+→ open cached copy in viewer
 ```
 
-Initial report:
+The cache layer provides:
 
 ```text
-fileName
-fileSizeBytes
-versionMarker
-detectedEquipment
-estimatedPageCount
-hasMainLayer
-hasBackgroundLayer
-hasLayerInfo
-hasLayerSequence
-hasTotalPath
-hasPageStyle
-hasTitleMetadata
-hasKeywordMetadata
-hasLinkMetadata
-hasStarMetadata
-compatibilityStatus
-warnings
+- sha256-based stable identity
+- source validation
+- cached-copy existence checks
+- recent-note library entries
+- protection against path traversal or opening arbitrary files as imported notes
 ```
 
-## 8. Supernote compatibility modes
+Original external notes remain unchanged.
 
-VellumSync should support multiple modes over time.
+## 9. Rendering strategy
+
+Current renderer behavior:
 
 ```text
-Viewer Mode
-- Read-only open and inspect
-- Safe first milestone
-
-Overlay Mode
-- Original .note remains untouched
-- Android annotations stored as sidecar data
-
-Native Sync Mode
-- Controlled .note write-back
-- Only enabled after file version validation
+Preferred: visual layer when a plausible RATTA_RLE decoder is available
+Fallback: TOTALPATH vector rendering when visual layer is unavailable or implausible
+Overlay: local Android strokes drawn separately above the read-only base
 ```
 
-## 9. Future .note parser layers
+The viewer should display a stable page even when a visual-layer decoder is not available. The status text may report that the fast vector renderer or fallback renderer is active, but this should not block interaction.
+
+## 10. Supernote parser layers
 
 ```text
-Parse Level 1: Container
-- header
+Level 1: Container
 - version marker
-- footer/table references
-- page offsets
+- module/file type markers
+- equipment marker
+- page references
+- page sections
+- layer offsets
 
-Parse Level 2: Visual
-- layer bitmap
-- background template
-- rendered page cache
+Level 2: Visual
+- MAINLAYER/BGLAYER records
+- RATTA_RLE metadata
+- bitmap payload offsets
+- shared background payloads
+- plausible decoder selection
 
-Parse Level 3: Stroke
-- TOTALPATH
-- pen type
-- width
-- grayscale
-- raw points
-- pressure
-- angle/tilt
-- bounds
+Level 3: Vector
+- TOTALPATH declared payload size
+- declared record count
+- record chain boundaries
+- point-count fields
+- raw point arrays
+- transform calibration
 
-Parse Level 4: Metadata
-- headings
-- keywords
-- links
-- stars
-- page navigation
+Level 4: Stroke semantics
+- pen/tool metadata
+- width metadata
+- grayscale metadata
+- eraser/path-removal metadata
+- unknown style samples
 
-Parse Level 5: Writer
-- create compatible .note
-- append compatible strokes
-- preserve unknown sections
-- rebuild offsets
-- validate with real device
+Level 5: App-owned model
+- canonical Vellum document
+- page/layer/stroke abstractions
+- overlay export model
+- future sync/write model
 ```
 
-## 10. Sync design
+## 11. Local overlay model
 
-Initial app does not sync.
-
-Future sync flow:
+Local overlay strokes are app-owned sidecar data.
 
 ```text
-Remote source
-→ download .note
-→ preserve original file
-→ parse and inspect
-→ render/read locally
-→ user edits compatible data
-→ write temp .note
-→ re-parse temp .note
-→ validate visual output
-→ upload atomically
-→ preserve recovery copy
+read-only base note
++ app-owned overlay strokes
+= displayed note surface
 ```
 
-Conflict policy:
+Overlay rules:
 
 ```text
-Remote changed only:
-- download and refresh
-
-Local changed only:
-- write and upload after validation
-
-Both changed different pages:
-- attempt page-level merge later
-
-Both changed same page:
-- do not auto-merge initially
-- create duplicate/conflict copy
-
-Unknown version:
-- open read-only
+- Stylus creates overlay strokes.
+- Finger input should not accidentally create handwriting.
+- Undo and clear operate on overlay data only.
+- Export can include overlay data.
+- Original .note bytes remain unchanged.
 ```
 
-## 11. Write-back safety rule
+## 12. Write-back safety model
 
-Never directly overwrite a Supernote file.
-
-Required write-back pipeline:
+Write-back is not production scope yet. Any future write-back must follow this pipeline:
 
 ```text
 original.note
 → working copy
-→ temp output
+→ generated temp output
 → parse temp output
 → render temp output
-→ compare expected output
-→ atomic replace/upload
-→ keep recovery copy
+→ compare against expected visual output
+→ test on real Supernote device
+→ atomic replace/upload only after validation
+→ preserve recovery copy
 ```
 
-## 12. Current deliverable
+Unknown sections must be preserved. Unsupported versions must remain read-only.
 
-VellumSync Foundation:
+## 13. Sync model
+
+Sync is future work. The initial sync design should be conservative:
 
 ```text
-- App launches
-- Device check works
-- Stylus probe works
-- .note picker works
-- Binary marker inspection works
-- Read-only compatibility report works
+Remote changed only: download and refresh cached read-only copy
+Local overlay changed only: sync sidecar overlay package first
+Both changed: create conflict copy rather than auto-merging
+Unknown Supernote format: read-only open only
 ```
 
-## 13. Roadmap
+## 14. Testing strategy
+
+Unit tests should cover:
 
 ```text
-Milestone 1: Foundation
-- app shell
-- stylus detection
-- .note marker inspector
-
-Milestone 2: Read-only Supernote parser
-- container parser
-- page/layer parser
-- metadata parser
-
-Milestone 3: Visual rendering
-- decode page bitmaps
-- compare against Supernote-exported PDFs
-
-Milestone 4: Stroke decoding
-- decode TOTALPATH
-- render vector strokes
-- map pen width/color/pressure
-
-Milestone 5: Overlay mode
-- Android sidecar annotations
-- original .note untouched
-
-Milestone 6: Minimal writer
-- create simple compatible .note
-- black pen, one page, one layer
-
-Milestone 7: Round-trip sync
-- edit compatible notes
-- validate on Supernote
-- conflict handling
+- import cache safety
+- container parser behavior
+- visual decoder/probe behavior
+- RATTA_RLE render assumptions
+- TOTALPATH structural parsing
+- stroke geometry decoding
+- stroke style/grayscale/eraser decoding
+- transform calibration
 ```
+
+Manual acceptance should use:
+
+```text
+- a real Supernote .note file
+- a Supernote-exported PDF of the same note
+- screenshots from BOOX Note Air 2 Plus
+- exported VellumSync diagnostics JSON when investigating rendering gaps
+```
+
+## 15. Release architecture
+
+Release artifacts are Android APKs. A release build should run:
+
+```bash
+./gradlew test
+./gradlew assembleDebug
+./gradlew assembleRelease
+```
+
+GitHub release tags should use `v*` names, for example:
+
+```text
+v0.1.0
+v1.0.0
+```
+
+Unsigned release APKs are suitable for internal testing. Signed release delivery requires a separate signing-key plan.
+
+## License
+
+VellumSync is licensed under the Apache License, Version 2.0. See `LICENSE` for the full license text and `NOTICE` for copyright and attribution notices.
+
+Unless a file states otherwise, repository source code, documentation, scripts, and project configuration are covered by Apache-2.0.
+
+Private user notes, exported PDFs, screenshots, diagnostics JSON, and local test corpora are not part of the default project license and should not be committed unless they are intentionally added as public test fixtures with explicit permission.
+
+VellumSync is an independent compatibility-focused application. Supernote, Ratta, BOOX, Onyx, Android, and Google names are used only for compatibility, platform, and testing references.

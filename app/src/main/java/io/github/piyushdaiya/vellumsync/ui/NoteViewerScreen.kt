@@ -87,12 +87,15 @@ fun NoteViewerScreen(
                 Log.i("VellumSyncOpen", "viewer open start path=${selection.notePath}")
                 val bytes = ImportedNoteCache.readCachedNote(selection.notePath)
                 Log.i("VellumSyncOpen", "viewer cached note read bytes=${bytes.size}")
-                SupernoteNoteInspector.inspect(
+                val inspectStartedAt = System.currentTimeMillis()
+                SupernoteNoteInspector.inspectForViewer(
                     fileName = selection.fileName,
                     fileSizeBytes = bytes.size.toLong(),
                     bytes = bytes,
                     cachedCopyPath = selection.notePath
-                )
+                ).also {
+                    Log.i("VellumSyncOpen", "viewer fast inspect complete elapsedMs=${System.currentTimeMillis() - inspectStartedAt}")
+                }
             }
         }
         report = result.getOrNull()
@@ -292,8 +295,14 @@ fun NoteViewerScreen(
     }
 
     fun exportDiagnostics() {
-        val inspection = report ?: return
+        val openedInspection = report ?: return
         val originalBytes = ImportedNoteCache.readCachedNote(selection.notePath)
+        val inspection = SupernoteNoteInspector.inspect(
+            fileName = selection.fileName,
+            fileSizeBytes = originalBytes.size.toLong(),
+            bytes = originalBytes,
+            cachedCopyPath = selection.notePath
+        )
         val featureJson = SupernoteFeatureCompatibilityAnalyzer.analyze(
             bytes = originalBytes,
             report = inspection
@@ -302,7 +311,7 @@ fun NoteViewerScreen(
             baseReportJson = inspection.toJson(),
             context = context,
             noteSha256 = selection.sha256,
-            totalPages = inspection.strokeGeometryReport.totalPages
+            totalPages = openedInspection.strokeGeometryReport.totalPages
         )
         pendingExportJson.value = appendJsonObjectField(withOverlay, "featureCompatibilityReport", featureJson)
         exportLauncher.launch("vellumsync-note-diagnostics-${inspection.sha256.take(12)}.json")
@@ -575,7 +584,7 @@ fun NoteViewerScreen(
         }
     }
 
-    AndroidView(
+    AndroidView<View>(
         factory = { androidContext ->
             LayoutInflater.from(androidContext).inflate(
                 R.layout.activity_main,
@@ -756,7 +765,7 @@ private fun bindXmlNoteSurface(
     prev.setOnClickListener { if (pageIndex > 0) onPrevious() }
     next.setOnClickListener { if (pageIndex < totalPages - 1) onNext() }
     canvasStatus.text = if (page != null) {
-        "Page ${page.pageNumber}/$totalPages · ${selectedVisualPage?.pageVisualStatusResolved ?: "visual-unknown"} · ${selectedVisualPage?.pageVisualStatusReason ?: transformMode.label} · ${toolStatus(activeTool, overlayVisible, overlayEditingEnabled, overlayEraserEnabled)}"
+        "Page ${page.pageNumber}/$totalPages · ${pageRenderStatus(selectedVisualPage)} · ${toolStatus(activeTool, overlayVisible, overlayEditingEnabled, overlayEraserEnabled)}"
     } else {
         "No preview available"
     }
@@ -846,6 +855,11 @@ private fun bindRail(
     onToolSelected: (NoteTool) -> Unit
 ) {
     val rail = root.findViewById<LinearLayout>(R.id.tool_rail)
+    val railStateTag = "${activeTool.name}:${activePanel?.name ?: "none"}"
+    if (rail.tag == railStateTag && rail.childCount > 0) {
+        return
+    }
+    rail.tag = railStateTag
     val inflater = LayoutInflater.from(root.context)
     rail.removeAllViews()
 
@@ -1254,8 +1268,19 @@ private fun View.color(resourceId: Int): Int = context.getColor(resourceId)
 private fun headerVisualStatus(pageReport: SupernoteVisualPageReport?): String {
     return when (pageReport?.pageVisualStatusResolved) {
         "visual-layer-active" -> "Visual layer active"
-        "visual-layer-unavailable" -> "Visual layer unavailable"
-        null -> "Visual status unknown"
+        "visual-layer-unavailable" -> "Vector renderer active"
+        "visual-deferred-for-fast-open" -> "Fast vector renderer"
+        null -> "Fast vector renderer"
+        else -> pageReport.pageVisualStatusResolved
+    }
+}
+
+private fun pageRenderStatus(pageReport: SupernoteVisualPageReport?): String {
+    return when (pageReport?.pageVisualStatusResolved) {
+        "visual-layer-active" -> "visual layer"
+        "visual-layer-unavailable" -> "vector fallback"
+        "visual-deferred-for-fast-open" -> "fast vector"
+        null -> "fast vector"
         else -> pageReport.pageVisualStatusResolved
     }
 }

@@ -1,8 +1,0 @@
-vellumsync_missing_cached_note_fast_fail_guard_compile_fix_v5
-
-Files:
-- scripts/patch_vellumsync_missing_cached_note_fast_fail_guard_compile_fix_v5.py
-- scripts/apply_vellumsync_missing_cached_note_fast_fail_guard_compile_fix_v5.sh
-- scripts/validate_vellumsync_missing_cached_note_fast_fail_guard_compile_fix_v5.sh
-- README-APPLY.md
-- MANIFEST.txt

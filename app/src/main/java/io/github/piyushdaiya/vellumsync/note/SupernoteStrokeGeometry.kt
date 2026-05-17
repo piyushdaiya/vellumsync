@@ -56,6 +56,7 @@ data class SupernoteStrokeGeometryRecord(
     val eraseActionScore: Float = 0f,
     val visualMismatchScore: Float = 0f,
     val suppressedAsErasure: Boolean = false,
+    val styleMetadata: SupernoteStrokeStyleMetadata = SupernoteStrokeStyleMetadata.UNKNOWN,
     val warnings: List<String>
 ) {
     fun toJson(): String {
@@ -76,6 +77,7 @@ data class SupernoteStrokeGeometryRecord(
             append("\"eraseActionScore\":${eraseActionScore.formatForJson()},")
             append("\"visualMismatchScore\":${visualMismatchScore.formatForJson()},")
             append("\"suppressedAsErasure\":$suppressedAsErasure,")
+            append("\"styleMetadata\":${styleMetadata.toJson()},")
             append("\"warnings\":${JsonText.stringArray(warnings)}")
             append("}")
         }
@@ -99,6 +101,11 @@ data class SupernoteStrokeGeometryPageReport(
     val suppressedRecordCount: Int = 0,
     val suppressedRecordIndexes: List<Int> = emptyList(),
     val visualLayerActiveForNormalRender: Boolean = false,
+    val strokeStyleCounts: Map<String, Int> = emptyMap(),
+    val strokeColorCounts: Map<String, Int> = emptyMap(),
+    val eraserRecordCount: Int = 0,
+    val eraserKnockoutAppliedCount: Int = 0,
+    val unknownStrokeMetadataSamples: List<String> = emptyList(),
     val records: List<SupernoteStrokeGeometryRecord>,
     val warnings: List<String>
 ) {
@@ -132,6 +139,11 @@ data class SupernoteStrokeGeometryPageReport(
             append("\"renderedNativeRecords\":$renderedRecords,")
             append("\"filteredDiagonalOrSentinelRecords\":$filteredDiagonalSentinelRecords")
             append("},")
+            append("\"strokeStyleCounts\":${intMapToJson(strokeStyleCounts)},")
+            append("\"strokeColorCounts\":${intMapToJson(strokeColorCounts)},")
+            append("\"eraserRecordCount\":$eraserRecordCount,")
+            append("\"eraserKnockoutAppliedCount\":$eraserKnockoutAppliedCount,")
+            append("\"unknownStrokeMetadataSamples\":${JsonText.stringArray(unknownStrokeMetadataSamples)},")
             append("\"records\":[")
             append(records.joinToString(separator = ",") { it.toJson() })
             append("],")
@@ -276,10 +288,11 @@ object SupernoteStrokeGeometryDecoder {
                 pageHeight = pageHeight
             )
         }
-        val rendered = normalizedRecords.count { it.points.size >= 2 }
-        val skipped = normalizedRecords.size - rendered
-        val unknown = normalizedRecords.count { it.subtype == "unknown" }
-        val possibleEraser = normalizedRecords.count { it.subtype == "possible_eraser_or_metadata" }
+        val eraserRecords = normalizedRecords.filter { it.styleMetadata.isEraser }
+        val rendered = normalizedRecords.count { it.points.size >= 2 && !it.styleMetadata.isEraser }
+        val skipped = normalizedRecords.count { it.points.size < 2 }
+        val unknown = normalizedRecords.count { it.subtype == "unknown" || it.styleMetadata.unknownMetadataSample != null }
+        val possibleEraser = normalizedRecords.count { it.subtype == "possible_eraser_or_metadata" || it.styleMetadata.isEraser }
         val filteredDiagonalSentinel = normalizedRecords.filter { it.subtype == "unsupported_or_misdecoded_record" }
         val warnings = buildList {
             if (rawBounds == null && page.candidateRecords.isNotEmpty()) {
@@ -289,7 +302,7 @@ object SupernoteStrokeGeometryDecoder {
                 add("$skipped record(s) skipped because fewer than two previewable points were available.")
             }
             if (possibleEraser > 0) {
-                add("$possibleEraser record(s) may be eraser/metadata paths and need a later subtype decoder.")
+                add("$possibleEraser record(s) may be eraser/metadata paths; known eraser records are rendered as transparent/background knockouts.")
             }
             if (filteredDiagonalSentinel.isNotEmpty()) {
                 add("${filteredDiagonalSentinel.size} record(s) are filtered from the active A5X renderer as diagonal/sentinel/non-stroke payloads: ${filteredDiagonalSentinel.joinToString { it.recordIndex.toString() }}.")
@@ -309,6 +322,11 @@ object SupernoteStrokeGeometryDecoder {
             filteredDiagonalSentinelRecords = filteredDiagonalSentinel.size,
             filteredRecordIndexes = filteredDiagonalSentinel.map { it.recordIndex },
             filteredRecordBounds = filteredDiagonalSentinel.mapNotNull { it.rawBounds },
+            strokeStyleCounts = SupernoteStrokeStyleDecoder.summarizeStyles(normalizedRecords),
+            strokeColorCounts = SupernoteStrokeStyleDecoder.summarizeColors(normalizedRecords),
+            eraserRecordCount = eraserRecords.size,
+            eraserKnockoutAppliedCount = eraserRecords.count { it.points.size >= 2 },
+            unknownStrokeMetadataSamples = SupernoteStrokeStyleDecoder.unknownSamples(normalizedRecords),
             records = normalizedRecords,
             warnings = warnings
         )
@@ -319,7 +337,8 @@ object SupernoteStrokeGeometryDecoder {
         val category: String,
         val source: String,
         val declaredPointCount: Int,
-        val points: List<SupernoteRawPoint>
+        val points: List<SupernoteRawPoint>,
+        val styleMetadata: SupernoteStrokeStyleMetadata
     )
 
     private fun rawRecord(record: SupernoteTotalPathRecordBoundary): RawRecord {
@@ -338,7 +357,8 @@ object SupernoteStrokeGeometryDecoder {
                 category = record.category,
                 source = if (decoded.rawPoints.isNotEmpty()) "decodedPointArray-full" else "decodedPointArray-sampled-preview",
                 declaredPointCount = decoded.declaredPointCount,
-                points = points
+                points = points,
+                styleMetadata = SupernoteStrokeStyleDecoder.decode(record.firstU32LeFields, record.recordIndex)
             )
         }
 
@@ -352,7 +372,8 @@ object SupernoteStrokeGeometryDecoder {
                 category = record.category,
                 source = "candidatePointRun-fallback-preview",
                 declaredPointCount = fallback.pairCount,
-                points = points
+                points = points,
+                styleMetadata = SupernoteStrokeStyleDecoder.decode(record.firstU32LeFields, record.recordIndex)
             )
         }
 
@@ -361,7 +382,8 @@ object SupernoteStrokeGeometryDecoder {
             category = record.category,
             source = "none",
             declaredPointCount = 0,
-            points = emptyList()
+            points = emptyList(),
+            styleMetadata = SupernoteStrokeStyleDecoder.decode(record.firstU32LeFields, record.recordIndex)
         )
     }
 
@@ -378,12 +400,19 @@ object SupernoteStrokeGeometryDecoder {
         } else {
             sourcePoints.map { point -> normalize(point, rawBounds, pageWidth, pageHeight) }
         }
+        val styleMetadata = rawRecord.styleMetadata
         val productionSubtype = classifySubtype(rawRecord, mappedPagePoints)
         val heuristicFallbackRecord = rawRecord.source == "candidatePointRun-fallback-preview"
-        val suspicious = heuristicFallbackRecord ||
-            isSuspiciousProductionStroke(rawRecord, mappedPagePoints, pageWidth, pageHeight)
+        val suspicious = !styleMetadata.isEraser && (
+            heuristicFallbackRecord ||
+                isSuspiciousProductionStroke(rawRecord, mappedPagePoints, pageWidth, pageHeight)
+            )
         val absolutePagePoints = if (suspicious) emptyList() else mappedPagePoints
-        val subtype = if (suspicious) "unsupported_or_misdecoded_record" else productionSubtype
+        val subtype = when {
+            styleMetadata.isEraser -> "eraser_knockout"
+            suspicious -> "unsupported_or_misdecoded_record"
+            else -> productionSubtype
+        }
         val normalizedBounds = if (absolutePagePoints.isEmpty()) null else computeNormalizedBounds(absolutePagePoints)
         val rawRecordBounds = computeRawBounds(rawRecord.points)
         val warnings = buildList {
@@ -405,6 +434,7 @@ object SupernoteStrokeGeometryDecoder {
             if (suspicious && !heuristicFallbackRecord) {
                 add("Record suppressed from normal rendering because it looks like a misdecoded non-stroke, eraser, marker payload, or page-corner sentinel. Raw-fit debug remains available for calibration.")
             }
+            addAll(styleMetadata.warnings)
         }
         return SupernoteStrokeGeometryRecord(
             recordIndex = rawRecord.recordIndex,
@@ -417,6 +447,7 @@ object SupernoteStrokeGeometryDecoder {
             normalizedBounds = normalizedBounds,
             points = absolutePagePoints,
             rawFitPoints = rawFitPoints,
+            styleMetadata = styleMetadata,
             warnings = warnings
         )
     }
@@ -554,6 +585,12 @@ object SupernoteStrokeGeometryDecoder {
         val x = marginX + ((point.x - bounds.minX).toFloat() / widthRange) * usableWidth
         val y = marginY + ((point.y - bounds.minY).toFloat() / heightRange) * usableHeight
         return SupernoteGeometryPoint(x = x.coerceIn(0f, pageWidth), y = y.coerceIn(0f, pageHeight))
+    }
+}
+
+private fun intMapToJson(values: Map<String, Int>): String {
+    return values.entries.joinToString(prefix = "{", postfix = "}") { entry ->
+        "${JsonText.quote(entry.key)}:${entry.value}"
     }
 }
 

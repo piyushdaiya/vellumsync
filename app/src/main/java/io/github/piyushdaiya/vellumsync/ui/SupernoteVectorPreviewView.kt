@@ -4,6 +4,9 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
+import android.graphics.RectF
 import android.view.MotionEvent
 import android.view.View
 import io.github.piyushdaiya.vellumsync.note.LocalAnnotationColor
@@ -37,6 +40,17 @@ class SupernoteVectorPreviewView(
         style = Paint.Style.STROKE
         strokeWidth = 2f
         alpha = 150
+    }
+
+    private val nativeInkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+    }
+
+    private val nativeEraserPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
     }
 
     private val overlayPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -212,6 +226,9 @@ class SupernoteVectorPreviewView(
         val filteredIndexes = mutableListOf<Int>()
         val filteredBounds = mutableListOf<String>()
 
+        var eraserKnockoutCount = 0
+        val nativeLayerBounds = RectF(viewport.left, viewport.top, viewport.left + viewport.drawWidth, viewport.top + viewport.drawHeight)
+        val nativeLayerSaveCount = canvas.saveLayer(nativeLayerBounds, null)
         report.records.forEach { record ->
             decodedNativeRecords += 1
             val displayPoints = if (transformMode == SupernotePreviewTransformMode.RAW_FIT && record.rawFitPoints.size >= 2) {
@@ -226,7 +243,7 @@ class SupernoteVectorPreviewView(
                 SupernoteGeometryPoint(mapped.first, mapped.second)
             }
 
-            if (shouldSuppressNativeRecordInActiveRenderer(recordIndex = record.recordIndex, subtype = record.subtype, source = record.source, points = mappedPoints, report = report)) {
+            if (!record.styleMetadata.isEraser && shouldSuppressNativeRecordInActiveRenderer(recordIndex = record.recordIndex, subtype = record.subtype, source = record.source, points = mappedPoints, report = report)) {
                 filteredIndexes.add(record.recordIndex)
                 filteredBounds.add(boundsLabel(mappedPoints))
                 return@forEach
@@ -238,21 +255,26 @@ class SupernoteVectorPreviewView(
             mappedPoints.drop(1).forEach { point ->
                 path.lineTo(viewport.left + point.x * viewport.scale, viewport.top + point.y * viewport.scale)
             }
-            val paint = if (record.subtype == "possible_eraser_or_metadata" || record.subtype == "unknown") {
-                lightStrokePaint
+
+            if (record.styleMetadata.isEraser) {
+                configureNativeEraserPaint(record, viewport.scale)
+                eraserKnockoutCount += 1
+                canvas.drawPath(path, nativeEraserPaint)
             } else {
-                strokePaint
+                configureNativeInkPaint(record, viewport.scale)
+                renderedNativeRecords += 1
+                canvas.drawPath(path, nativeInkPaint)
             }
-            renderedNativeRecords += 1
-            canvas.drawPath(path, paint)
         }
+        canvas.restoreToCount(nativeLayerSaveCount)
 
         lastRenderDiagnostics = ActiveRenderDiagnostics(
             totalDecodedRecords = decodedNativeRecords,
             renderedNativeRecords = renderedNativeRecords,
             filteredDiagonalSentinelRecords = filteredIndexes.size,
             filteredRecordIndexes = filteredIndexes.toList(),
-            filteredRecordBounds = filteredBounds.toList()
+            filteredRecordBounds = filteredBounds.toList(),
+            eraserKnockoutRecords = eraserKnockoutCount
         )
 
         if (overlayVisible) {
@@ -285,7 +307,38 @@ class SupernoteVectorPreviewView(
 
     fun activeRenderDiagnosticsSummary(): String {
         val diagnostics = lastRenderDiagnostics
-        return "decoded=${diagnostics.totalDecodedRecords}; rendered=${diagnostics.renderedNativeRecords}; filtered=${diagnostics.filteredDiagonalSentinelRecords}; indexes=${diagnostics.filteredRecordIndexes.joinToString()}"
+        return "decoded=${diagnostics.totalDecodedRecords}; rendered=${diagnostics.renderedNativeRecords}; eraserKnockout=${diagnostics.eraserKnockoutRecords}; filtered=${diagnostics.filteredDiagonalSentinelRecords}; indexes=${diagnostics.filteredRecordIndexes.joinToString()}"
+    }
+
+
+    private fun configureNativeInkPaint(
+        record: io.github.piyushdaiya.vellumsync.note.SupernoteStrokeGeometryRecord,
+        scale: Float
+    ) {
+        val style = record.styleMetadata
+        nativeInkPaint.style = Paint.Style.STROKE
+        nativeInkPaint.color = style.mappedAndroidColor
+        nativeInkPaint.alpha = style.strokeAlpha.coerceIn(0, 255)
+        nativeInkPaint.strokeWidth = (style.strokeWidthPx * scale).coerceAtLeast(1.25f)
+        nativeInkPaint.strokeCap = when (style.capStyle) {
+            "square" -> Paint.Cap.SQUARE
+            "butt" -> Paint.Cap.BUTT
+            else -> Paint.Cap.ROUND
+        }
+        nativeInkPaint.strokeJoin = when (style.joinStyle) {
+            "bevel" -> Paint.Join.BEVEL
+            "miter" -> Paint.Join.MITER
+            else -> Paint.Join.ROUND
+        }
+    }
+
+    private fun configureNativeEraserPaint(
+        record: io.github.piyushdaiya.vellumsync.note.SupernoteStrokeGeometryRecord,
+        scale: Float
+    ) {
+        nativeEraserPaint.strokeWidth = (record.styleMetadata.strokeWidthPx * scale).coerceAtLeast(8f)
+        nativeEraserPaint.strokeCap = Paint.Cap.ROUND
+        nativeEraserPaint.strokeJoin = Paint.Join.ROUND
     }
 
     private fun shouldSuppressNativeRecordInActiveRenderer(
@@ -700,7 +753,8 @@ class SupernoteVectorPreviewView(
         val renderedNativeRecords: Int = 0,
         val filteredDiagonalSentinelRecords: Int = 0,
         val filteredRecordIndexes: List<Int> = emptyList(),
-        val filteredRecordBounds: List<String> = emptyList()
+        val filteredRecordBounds: List<String> = emptyList(),
+        val eraserKnockoutRecords: Int = 0
     )
 
     private data class PreviewViewport(

@@ -151,6 +151,38 @@ data class SupernoteVisualReport(
 }
 
 object SupernoteVisualDecoder {
+    fun skippedForViewer(
+        containerReport: SupernoteContainerReport
+    ): SupernoteVisualReport {
+        val pageReports = containerReport.pageSections.map { page ->
+            SupernoteVisualPageReport(
+                pageNumber = page.pageNumber,
+                pageStyle = page.pageStyle,
+                layerSeq = page.layerSeq,
+                layerRecords = emptyList(),
+                expectedPdfReference = null,
+                previewStatus = "Visual layer deferred during viewer open",
+                pageVisualWinnerPromoted = false,
+                pageVisualWinnerSource = null,
+                pageVisualFinalDecoderFamily = null,
+                pageVisualPromotedFromDecoderFamily = null,
+                pageVisualStatusResolved = "visual-deferred-for-fast-open",
+                pageVisualStatusReason = "Viewer open skips RATTA_RLE visual-layer probes; vector rendering is active and full visual diagnostics run only during explicit export.",
+                pageVisualFallbackUsed = true,
+                warnings = listOf("Viewer open skipped visual-layer metadata and bitmap decoder probes for faster note display.")
+            )
+        }
+        return SupernoteVisualReport(
+            formatStatus = "Viewer-fast open skipped RATTA_RLE visual-layer diagnostics.",
+            totalLayerRecords = 0,
+            rleLayerRecordCount = 0,
+            uniqueBitmapPayloadOffsetCount = 0,
+            sharedBitmapPayloads = emptyList(),
+            pageReports = pageReports,
+            decoderWarnings = listOf("Visual-layer diagnostics were intentionally deferred while opening the viewer.")
+        )
+    }
+
     fun decode(
         bytes: ByteArray,
         containerReport: SupernoteContainerReport,
